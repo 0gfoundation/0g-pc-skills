@@ -9,10 +9,11 @@ Configure Claude Code to run on 0G Private Computer's inference API. Every confi
 
 ## Hard rules (read first)
 
-1. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. Resolve the key in this order: (1) the `ZG_API_KEY` environment variable; (2) a `ZG_API_KEY=` line in the project's `.env`; (3) ask the user to `export ZG_API_KEY='sk-…'` and continue. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not.
+1. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. Resolve the key in this order: (1) the `ZG_API_KEY` environment variable; (2) a `ZG_API_KEY=` line in the project's `.env`; (3) ask the user to `export ZG_API_KEY='sk-…'` and continue. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not. The key lands in a file inside the user's repository, so it may only be written once git is confirmed to be ignoring that file — the writer script in Step 5 enforces this and aborts if it cannot.
 2. **Only use configs from this skill.** They are tested; improvised combinations fail in ways that are hard to diagnose (see "Why the gate model matters" below).
 3. **Permission-gate iron rule:** the `modelOverrides` and `ANTHROPIC_DEFAULT_HAIKU_MODEL` entries must point to a fast non-reasoning model (`0gm-1.0-35b-a3b`). Never put a reasoning model (glm-5.2, glm-5.3, kimi-k3) there. Reason: in auto mode, every non-read-only action triggers a yes/no safety call on that slot; a reasoning model turns it into a ~950-token reasoning pass, times out, and every Bash/git/network action fails with "model is temporarily unavailable" while chat still works.
-4. **This skill cannot switch the current session.** Config edits take effect on the next `claude` launch. Finish by telling the user to restart and run the verification steps — do not claim the current session now uses 0G.
+4. **Never write to `~/.claude/settings.json`.** That file carries the user's hooks, statusLine, plugins, and their `/model` choice; merging a provider config into it entangles two unrelated things and makes rollback a manual un-merge. Write the project-level `.claude/settings.local.json` instead (verified to carry `env` and `modelOverrides`), or — when the user wants 0G across projects — a standalone `~/.0g/0g-settings.json` they load with `claude --settings`. Either way rollback is deleting one file. Read the global file freely; never modify it.
+5. **This skill cannot switch the current session.** Config edits take effect on the next `claude` launch. Finish by telling the user to restart and run the verification steps — do not claim the current session now uses 0G.
 
 ## Workflow
 
@@ -47,12 +48,12 @@ Expected output: a table of model IDs, formats, TEE type, context length. Confir
 
 Also confirm `0gm-1.0-35b-a3b` is listed (it is the gate model for both paths). If the endpoint is unreachable, stop and report — do not proceed on a stale model list.
 
-### Step 3 — Inspect existing config
+### Step 3 — Inspect existing config (read only — never modify it)
 
-Tool: **Read** `~/.claude/settings.json` (if it exists).
+Tool: **Read** `~/.claude/settings.json` and `<project>/.claude/settings.json` if they exist. Both are inspected for conflicts; **neither is written** (hard rule 4).
 
-- If `env` already contains `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, or any `ANTHROPIC_DEFAULT_*_MODEL` from a previous provider (Kimi, GLM, etc.): tell the user which keys will be replaced, and preserve all unrelated settings (hooks, plugins, permissions, statusLine…).
-- Also warn the user to check `~/.zshrc` / `~/.bashrc` for stale `ANTHROPIC_*` exports — `settings.json` `env` overrides shell exports, but leftovers cause confusion when the file is removed later.
+- If either `env` already contains `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, or any `ANTHROPIC_DEFAULT_*_MODEL` from a previous provider (Kimi, GLM, etc.): tell the user those values will be shadowed by the project-level file this skill writes, and that removing them is their call — leftovers in the global file are the usual reason a later rollback appears not to work.
+- Also warn the user to check `~/.zshrc` / `~/.bashrc` for stale `ANTHROPIC_*` exports — settings `env` overrides shell exports, but leftovers cause confusion when the config file is removed later.
 
 ### Step 4 — Resolve the API key (never see it, never fake it)
 
@@ -71,7 +72,7 @@ If neither reports a key, stop and tell the user:
 
 ### Step 5A — Path A: direct connection (main model glm-5.2)
 
-This is the shape the config takes (`ANTHROPIC_AUTH_TOKEN` is filled in by the writer script below, from the environment — never typed by hand):
+Target: `<repo root>/.claude/settings.local.json`. This is the shape the config takes (`ANTHROPIC_AUTH_TOKEN` is filled in by the writer script below, from the environment — never typed by hand):
 
 ```json
 {
@@ -98,7 +99,7 @@ Tool: **Bash**. Write it with this script — **not** with Edit/Write. The scrip
 
 ```bash
 python3 - <<'PY'
-import json, os, pathlib, re, sys
+import json, os, pathlib, re, subprocess, sys
 
 key = os.environ.get("ZG_API_KEY", "").strip()
 if not key:
@@ -110,7 +111,31 @@ if not key:
 if not key:
     sys.exit("no ZG_API_KEY resolved — refusing to write a placeholder config (hard rule 1)")
 
-target = pathlib.Path.home() / ".claude" / "settings.json"
+def git(*args):
+    r = subprocess.run(("git",) + args, capture_output=True, text=True)
+    return r.returncode, r.stdout.strip()
+
+rc, root = git("rev-parse", "--show-toplevel")
+root = pathlib.Path(root) if rc == 0 else pathlib.Path.cwd()
+target = root / ".claude" / "settings.local.json"
+
+# The key lands inside the repo, so git must be ignoring this file before it exists.
+if rc == 0:
+    rel = target.relative_to(root).as_posix()
+    if git("ls-files", "--error-unmatch", rel)[0] == 0:
+        sys.exit("%s is tracked by git — adding a key to it would stage a secret. "
+                 "Run `git rm --cached %s` first, then re-run this step." % (rel, rel))
+    if git("check-ignore", "-q", rel)[0] != 0:
+        gi = root / ".gitignore"
+        prev = gi.read_text() if gi.is_file() else ""
+        with gi.open("a") as f:
+            if prev and not prev.endswith("\n"):
+                f.write("\n")
+            f.write("\n# 0G PC config — contains an API key, never commit\n.claude/settings.local.json\n")
+        print("appended .claude/settings.local.json to", gi)
+    if git("check-ignore", "-q", rel)[0] != 0:
+        sys.exit("git still does not ignore %s — refusing to write a key into a tracked path" % rel)
+
 cfg = json.loads(target.read_text()) if target.is_file() else {}
 cfg.setdefault("env", {}).update({
     "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
@@ -144,6 +169,7 @@ Notes to apply, not to debate:
 - `modelOverrides` sets the permission-gate model and exists **only** in settings.json (no env-var equivalent). Do not substitute `ANTHROPIC_DEFAULT_SONNET_MODEL` — that replaces the whole slot and re-enables reasoning on the gate call.
 - `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is required; without it a 1M-context model is treated as 200K and compacts early.
 - If using a different anthropic-format main model, change only the three main-model lines; keep the gate entries as-is.
+- **Scope:** a project-level file applies only inside that directory. If the user wants 0G in every project, write the same JSON to `~/.0g/0g-settings.json` instead (outside any repo, so the gitignore guard is not needed) and have them launch with `claude --settings ~/.0g/0g-settings.json` — worth an alias. Rollback is still one `rm`.
 
 Then go to Step 6.
 
@@ -229,7 +255,7 @@ uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 
 
 (If `uvx` is unavailable, alternative: `pip install 'litellm[proxy]==1.98.0'` then `litellm --config litellm-config.yaml --port 4000` from the same directory. Pin 1.98.0 — it is the tested version.)
 
-Then Tool: **Edit**/**Write** `~/.claude/settings.json` (merge, preserving unrelated keys); the main model below is `glm-5.3` — substitute the user's chosen model name in the three main-model lines:
+Then write `<repo root>/.claude/settings.local.json` with the same script as Step 5A (same gitignore guard; substitute the values below). The main model here is `glm-5.3` — substitute the user's chosen model name in the three main-model lines. Path B's token is the literal `sk-anything`, not a key: the local proxy does not authenticate, and the real key lives only in the proxy terminal's `ZG_API_KEY`.
 
 ```json
 {
@@ -258,7 +284,7 @@ Then Tool: **Edit**/**Write** `~/.claude/settings.json` (merge, preserving unrel
 
 Tell the user, verbatim in substance:
 
-1. The config is already complete — the key was injected from `ZG_API_KEY` in Step 5 and the `HTTP 200` probe confirmed it works. There is nothing left to fill in by hand. (Path B: the settings.json token stays `sk-anything`; the real key lives only in the proxy terminal's `export ZG_API_KEY=…`.)
+1. The config is already complete — it lives in `.claude/settings.local.json` in this project, the key was injected from `ZG_API_KEY` in Step 5, and the `HTTP 200` probe confirmed it works. Nothing is left to fill in by hand, and their global `~/.claude/settings.json` was not touched. **To roll back: `rm .claude/settings.local.json`.** (Path B: the token in that file stays `sk-anything`; the real key lives only in the proxy terminal's `export ZG_API_KEY=…`.)
 2. Restart Claude Code (close all windows, open a new terminal, run `claude`). Config changes do not affect the current session.
 3. In the new session, type `/status` — the Base URL must show `https://router-api.0g.ai` (Path A) or `http://127.0.0.1:4000` (Path B). The startup warning `[claude-code:unrecognized_model]` is harmless.
 4. Ask the new session to run one gated action, e.g. "use Bash to run `echo ok > probe.txt && cat probe.txt`". Success with no "temporarily unavailable" error proves the gate path works.
@@ -287,4 +313,4 @@ curl -s http://127.0.0.1:4000/v1/messages -H "x-api-key: sk-anything" \
 | 401 | Key wrong or expired. Path A: re-run Step 4's probe, re-export a fresh key, re-run the Step 5A writer, and re-run the `HTTP 200` check before handing off. Path B: `ZG_API_KEY` not exported in the proxy terminal. A 401 also takes down the auto-mode classifier, so fix this before diagnosing any gate symptom. |
 | Model not found | Typo vs Step 2 list, or (Path B) model missing from `model_list`. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
-| Config edits ignored | Old session still running, or leftover `ANTHROPIC_*` in `env` overriding — re-run Step 3. |
+| Config edits ignored | Old session still running; or `claude` was launched from a directory other than the project holding `.claude/settings.local.json` (project config is scoped to that directory — use the `~/.0g/0g-settings.json` + `claude --settings` route for global use); or leftover `ANTHROPIC_*` in the global `env` or the shell — re-run Step 3. |

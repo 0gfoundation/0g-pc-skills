@@ -119,6 +119,33 @@ rc, root = git("rev-parse", "--show-toplevel")
 root = pathlib.Path(root) if rc == 0 else pathlib.Path.cwd()
 target = root / ".claude" / "settings.local.json"
 
+# A [1m]-tagged session model poisons the auto-mode classifier. Claude Code derives the
+# classifier model from the Sonnet tier, then copies the main model's [1m] tag onto the
+# result — asking the router for an ID such as 0gm-1.0-35b-a3b[1m], which it does not
+# serve. The classifier becomes unreachable and auto mode fails closed on every
+# non-read-only tool. Check the effective value (local > project > user) before writing.
+effective = None
+for label, src in (("project .claude/settings.local.json", target),
+                   ("project .claude/settings.json", root / ".claude" / "settings.json"),
+                   ("user ~/.claude/settings.json", pathlib.Path.home() / ".claude" / "settings.json")):
+    try:
+        m = json.loads(src.read_text()).get("model")
+    except Exception:
+        continue
+    if isinstance(m, str) and m.strip():
+        effective = (label, m.strip())
+        break
+if effective and effective[1].lower().endswith("[1m]"):
+    sys.exit(
+        'the effective session model is "%s" (from %s).\n'
+        "Claude Code copies that [1m] tag onto the model it derives for the auto-mode "
+        "safety classifier, producing an ID the 0G router does not serve — every Bash, "
+        "git and network action then fails closed. Refusing to write a config that is "
+        "known to break. Fix it one of two ways, then re-run this step:\n"
+        "  1. run /model and pick the same model without the (1M context) variant, or\n"
+        '  2. add "model": "glm-5.2" to .claude/settings.local.json to override it here.'
+        % (effective[1], effective[0]))
+
 # The key lands inside the repo, so git must be ignoring these paths before they exist.
 # The .bak and .tmp siblings carry the key too — a rule covering only the exact filename
 # would leave the backup committable.
@@ -222,6 +249,9 @@ Notes to apply, not to debate:
 
 - `modelOverrides` sets the permission-gate model and exists **only** in settings.json (no env-var equivalent). Do not substitute `ANTHROPIC_DEFAULT_SONNET_MODEL` — that replaces the whole slot and re-enables reasoning on the gate call.
 - `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is required; without it a 1M-context model is treated as 200K and compacts early.
+- `modelOverrides["claude-sonnet-5"]` is what actually pins the permission gate. On a third-party router the auto-mode classifier resolves through the **Sonnet** tier: `ANTHROPIC_DEFAULT_SONNET_MODEL` if set and available, otherwise the built-in `claude-sonnet-5` mapped through `modelOverrides`. Leave this entry pointing at `0gm-1.0-35b-a3b`.
+- Second-order hazard worth knowing: when the main model resolves to the fable or mythos tier, the classifier falls back to the **Opus** tier instead — which this config points at `glm-5.2`, a reasoning model. That is the ~950-token reasoning pass that times out and produces "model is temporarily unavailable" on every gated action. Another reason not to leave a `[1m]`/fable session model in play.
+- The `[1m]` guard reads the config files only. It cannot see a `claude --model 'something[1m]'` launched by hand — if the symptom appears anyway, check how the session was started.
 - The script validates **before** writing, not after: unknown top-level keys and unknown env var names abort the run, an unparseable existing file is never overwritten, and the write itself goes through a temp file plus `os.replace` so a half-written config is never visible. Validating after the write is useless — by then the user's previous config is already gone.
 - If using a different anthropic-format main model, change only the three main-model lines; keep the gate entries as-is.
 - **Scope:** a project-level file applies only inside that directory. If the user wants 0G in every project, write the same JSON to `~/.0g/0g-settings.json` instead (outside any repo, so the gitignore guard is not needed) and have them launch with `claude --settings ~/.0g/0g-settings.json` — worth an alias. Rollback is still one `rm`.

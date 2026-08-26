@@ -11,9 +11,10 @@ Why a bridge is mandatory (state this once to the user, then move on): Codex ≥
 
 ## Hard rules (read first)
 
-1. **Never echo, log, or repeat the user's API key.** It goes only into the `ZG_API_KEY` environment variable of the proxy terminal. Never write it into any file inside a git repository.
-2. **Only use configs from this skill.** Two items are load-bearing and non-obvious: `use_chat_completions_api: true` on every model entry (without it requests hit a nonexistent upstream endpoint) and the `zg_patch.py` callback (without it every response stream breaks before completion and Codex reconnects forever).
-3. **Config edits take effect on the next `codex` launch.** Finish by handing the user the run + verification commands — do not claim the current session is already on 0G.
+1. **Never echo, log, or repeat the user's API key.** It goes only into the `ZG_API_KEY` environment variable of the proxy terminal. Never write it into any file inside a git repository. Note that `ZG_LITELLM_KEY="sk-anything"` in Step 6 is **not** a placeholder waiting to be filled in — the local proxy performs no authentication, so any string works. Leave it alone; the real key lives only in the proxy terminal.
+2. **Never write to `~/.codex/config.toml`.** That file carries the user's other providers, approval policy, and MCP servers; appending to it makes rollback a manual un-append. Everything this skill needs — the profile *and* the `[model_providers.zg]` block — fits in a standalone `~/.codex/<name>.config.toml`, verified to load with no base `config.toml` present at all. Rollback is deleting one file. Read the base file freely; never modify it.
+3. **Only use configs from this skill.** Two items are load-bearing and non-obvious: `use_chat_completions_api: true` on every model entry (without it requests hit a nonexistent upstream endpoint) and the `zg_patch.py` callback (without it every response stream breaks before completion and Codex reconnects forever).
+4. **Config edits take effect on the next `codex` launch.** Finish by handing the user the run + verification commands — do not claim the current session is already on 0G.
 
 ## Workflow
 
@@ -137,26 +138,63 @@ Expected output: a liveliness response, then the model names from `model_list`.
 
 ### Step 5 — Configure Codex
 
-Tool: **Read** `~/.codex/config.toml` first. If a `[model_providers.zg]` block already exists, update it in place instead of appending a duplicate. Preserve everything else in the file.
+Everything goes in one standalone profile file. `~/.codex/config.toml` is never touched — a profile file carries its own `[model_providers.*]` block, and Codex loads it even when no base `config.toml` exists.
 
-Tool: **Edit** (append) `~/.codex/config.toml`:
+Profiles in Codex ≥ 0.145 are **standalone files**; an inline `[profiles.x]` table in config.toml makes Codex refuse to start.
 
-```toml
+Tool: **Bash**. Write it with this script — it validates the TOML in memory before anything reaches disk, and backs up a previous file of the same name:
+
+```bash
+python3 - <<'PY'
+import pathlib, shutil, sys
+try:
+    import tomllib
+except ModuleNotFoundError:
+    tomllib = None
+
+MODEL = "glm-5.3"          # must exist in the LiteLLM model_list
+NAME  = "zg-glm53"         # the --profile name
+
+body = """model = "%s"
+model_provider = "zg"
+
 [model_providers.zg]
 name = "0G Private Computer via LiteLLM"
 base_url = "http://127.0.0.1:4000/v1"
 env_key = "ZG_LITELLM_KEY"
 wire_api = "responses"
+""" % MODEL
+
+if tomllib is not None:
+    try:
+        parsed = tomllib.loads(body)
+    except tomllib.TOMLDecodeError as e:
+        sys.exit("refusing to write: generated TOML does not parse (%s)" % e)
+    if parsed["model_providers"]["zg"]["wire_api"] != "responses":
+        sys.exit('refusing to write: wire_api must be "responses" on Codex >= 0.145')
+else:
+    print("note: python < 3.11, no tomllib — relying on the config-load check below")
+
+home = pathlib.Path.home() / ".codex"
+home.mkdir(parents=True, exist_ok=True)
+target = home / (NAME + ".config.toml")
+if target.is_file():
+    shutil.copy2(target, str(target) + ".bak")
+    print("backed up previous profile to", str(target) + ".bak")
+target.write_text(body)
+print("wrote", target)
+PY
 ```
 
-Profiles in Codex ≥ 0.145 are **standalone files** — an inline `[profiles.x]` table in config.toml makes Codex refuse to start. Tool: **Write** `~/.codex/zg-glm53.config.toml`:
+For each additional model, run it again with `MODEL` and `NAME` changed (the model must exist in the LiteLLM `model_list`).
 
-```toml
-model_provider = "zg"
-model = "glm-5.3"
+Then confirm Codex can actually load it — **before** handing off. Unsetting the key makes the check stop right after config resolution, so it needs neither the proxy nor the network:
+
+```bash
+env -u ZG_LITELLM_KEY codex exec --profile zg-glm53 --skip-git-repo-check hi < /dev/null 2>&1 | tail -3
 ```
 
-For each additional model the user wants, Write another `~/.codex/zg-<shortname>.config.toml` with the same two lines and the model name changed (the model must exist in the LiteLLM `model_list`).
+The `< /dev/null` is required — `codex exec` blocks waiting on stdin when it is a pipe. Expected: ``Missing environment variable: `ZG_LITELLM_KEY` `` — that message means the config parsed *and* the `zg` provider resolved. Anything starting `Error loading config.toml:` means the profile is broken; fix it before continuing. (`codex doctor` will not catch this — it does not read profile files.)
 
 ### Step 6 — Hand off: run + verify
 
@@ -195,6 +233,8 @@ curl -s -N http://127.0.0.1:4000/v1/responses -H "Authorization: Bearer sk-anyth
 | `stream disconnected before completion` + endless reconnects | `zg_patch.py` not loaded: confirm `litellm_settings.callbacks` names it, the file sits next to the config, and the proxy was started from that directory. Re-check with Layer 2 (expect 1). |
 | HTTP 400 `cannot unmarshal object into ... reasoning_effort` | `additional_drop_params: ["reasoning_effort"]` missing from the model entry. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
+| `Error loading config.toml: <file>:L:C: ...` naming your profile file | The profile TOML is malformed. The Step 5 writer validates before writing; if the file was hand-edited since, re-run the writer. `codex doctor` will not surface this — it does not load profile files. |
+| `codex doctor` says config is fine but `--profile` fails | Expected: doctor reads only the base `config.toml`. Use the Step 5 config-load check (`env -u ZG_LITELLM_KEY codex exec --profile …`) to validate a profile. |
 | `--profile ... cannot be used while config.toml contains legacy [profiles.x]` | Old inline profile table present. Move it into a standalone `<name>.config.toml` (Step 5). |
 | 401 from the router | `ZG_API_KEY` not exported in the proxy terminal, or the key is invalid. |
 | Codex hangs with no request reaching LiteLLM | Proxy not running or wrong port — re-run the Step 4 health check. |

@@ -17,16 +17,9 @@ Configure Claude Code to run on 0G Private Computer's inference API. Every confi
 
 ## Workflow
 
-### Step 1 — Ask two questions
+### Step 1 — Fetch the live model list first
 
-Ask the user (briefly, not a questionnaire):
-
-1. "Is your code/data confidential (must run fully inside TEE enclaves)?" → If yes: use **Path A** with a **Private**-mode key (note: only 3 models available, no failover; tell the user this trade-off).
-2. "Which main model do you want?" → `glm-5.2` (or another anthropic-format model) → **Path A (direct)**. `glm-5.3` / `kimi-k3` / `qwen3.8-max` / other openai-only models → **Path B (via LiteLLM)**.
-
-If the user has no preference: default to Path A with `glm-5.2`.
-
-### Step 2 — Check the live model list
+Ask nothing before this. The main-model question is unanswerable without the list, and the list is what decides Path A vs Path B.
 
 Tool: **Bash**
 
@@ -41,12 +34,30 @@ If `jq` is not installed, use this instead (macOS ships python3):
 curl -s https://router-api.0g.ai/v1/models | python3 -c "import json,sys; [print(m['id'], '+'.join(m.get('supported_formats',[])), m.get('verifiability','-'), m.get('context_length')) for m in json.load(sys.stdin)['data']]"
 ```
 
-Expected output: a table of model IDs, formats, TEE type, context length. Confirm the chosen main model exists and note its `supported_formats`:
+Show the user the result grouped by connection path — `supported_formats` containing `anthropic` means Path A (direct), `openai` only means Path B (via LiteLLM). Roughly:
 
-- contains `anthropic` → Path A works (direct connection).
-- `openai` only → Path B required (LiteLLM translation).
+```
+Direct (Path A):   glm-5.2 (1048576)   0gm-1.0-35b-a3b (262144)   deepseek-v4-flash (1M)
+                   glm-5 (202752)      claude-sonnet-5 (1M)       claude-opus-5 (1M)
+Via LiteLLM (B):   glm-5.3 (1M)   kimi-k3 (1048576)   qwen3.8-max (1M)   minimax-m3 (1M)
+                   gpt-5.6-* (1M)   deepseek-v4-pro (1M)   kimi-k2.7-code (262144)
+```
 
-Also confirm `0gm-1.0-35b-a3b` is listed (it is the gate model for both paths). If the endpoint is unreachable, stop and report — do not proceed on a stale model list.
+That grouping is illustrative — always print what the live call returned, never this snapshot.
+
+Also confirm `0gm-1.0-35b-a3b` is listed (it is the gate model for both paths). If the endpoint is unreachable, **stop and report** — do not proceed on a stale model list, and do not start asking questions.
+
+### Step 2 — Ask five questions
+
+With the list on screen, ask all five at once. Every one has a default, so a user with no opinions answers by nodding once.
+
+1. **Confidential?** Does the code/data have to run fully inside TEE enclaves? → yes means **Path A** with a **Private**-mode key (trade-off: only 3 models, no failover — say so). *Default: no.*
+2. **Main model?** Pick from the Step 1 table. Anthropic-format → **Path A (direct)**; openai-only → **Path B (via LiteLLM)**. *Default: `glm-5.2` (Path A).*
+3. **Scope?** This project only, or every project? Project-only writes `.claude/settings.local.json` and needs no launch flag. Every-project writes `~/.0g/0g-settings.json`, which lives outside any repo but has to be loaded with `claude --settings ~/.0g/0g-settings.json`. *Default: this project only.*
+4. **Permission mode?** State both costs — do not set this silently:
+   - `acceptEdits` *(default)* — file edits pass automatically, Bash asks each time. No dependency on the safety classifier, so a router hiccup cannot take the session down.
+   - `auto` — the classifier judges non-read-only actions, so far fewer confirmations; but it is an extra request against the router, and if it fails (router wobble, a `[1m]` model name, an expired key) Claude Code fails closed and refuses **every** non-read-only tool. Choose this only if the gate config in Step 5A has been verified.
+5. **Key source?** `ZG_API_KEY` already exported / a `ZG_API_KEY=` line in `.env` / you will export one now. *Default: whichever Step 4's probe finds.*
 
 ### Step 3 — Inspect existing config (read only — never modify it)
 
@@ -91,7 +102,7 @@ Target: `<repo root>/.claude/settings.local.json`. This is the shape the config 
   "modelOverrides": {
     "claude-sonnet-5": "0gm-1.0-35b-a3b"
   },
-  "permissions": { "defaultMode": "auto" }
+  "permissions": { "defaultMode": "acceptEdits" }
 }
 ```
 
@@ -183,7 +194,7 @@ FRAGMENT = {
         "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616",
     },
     "modelOverrides": {"claude-sonnet-5": "0gm-1.0-35b-a3b"},
-    "permissions": {"defaultMode": "auto"},
+    "permissions": {"defaultMode": "acceptEdits"},   # "auto" only if the user chose it in Step 2
 }
 KNOWN_TOP = {"env", "modelOverrides", "permissions"}
 KNOWN_ENV = {
@@ -359,7 +370,7 @@ Then write `<repo root>/.claude/settings.local.json` with the same script as Ste
   "modelOverrides": {
     "claude-sonnet-5": "0gm-1.0-35b-a3b"
   },
-  "permissions": { "defaultMode": "auto" }
+  "permissions": { "defaultMode": "acceptEdits" }
 }
 ```
 
@@ -372,7 +383,7 @@ Tell the user, verbatim in substance:
 1. The config is already complete — it lives in `.claude/settings.local.json` in this project, the key was injected from `ZG_API_KEY` in Step 5, and the `HTTP 200` probe confirmed it works. Nothing is left to fill in by hand, and their global `~/.claude/settings.json` was not touched. **To roll back: `rm .claude/settings.local.json`.** (Path B: the token in that file stays `sk-anything`; the real key lives only in the proxy terminal's `export ZG_API_KEY=…`.)
 2. Restart Claude Code (close all windows, open a new terminal, run `claude`). Config changes do not affect the current session.
 3. In the new session, type `/status` — the Base URL must show `https://router-api.0g.ai` (Path A) or `http://127.0.0.1:4000` (Path B). The startup warning `[claude-code:unrecognized_model]` is harmless.
-4. Ask the new session to run one gated action, e.g. "use Bash to run `echo ok > probe.txt && cat probe.txt`". Success with no "temporarily unavailable" error proves the gate path works.
+4. Ask the new session to run one Bash action, e.g. "use Bash to run `echo ok > probe.txt && cat probe.txt`". Under `acceptEdits` it should prompt for confirmation and then succeed — that exercises the model, not the classifier. If the user chose `auto` in Step 2, it should instead run without a prompt and without a "temporarily unavailable" error; that is the check that proves the gate config in Step 5A is right, and it is the only way to know before trusting `auto`.
 
 If something fails, run these probes (Tool: **Bash**) and match the layer that breaks:
 
@@ -398,6 +409,6 @@ curl -s http://127.0.0.1:4000/v1/messages -H "x-api-key: sk-anything" \
 | That message names a model with a `[1m]` suffix (e.g. `0gm-1.0-35b-a3b[1m]`) | The session model carries `[1m]` and Claude Code copied the tag onto the derived classifier model; the router does not serve that ID. Drop the tag: `/model` without the (1M context) variant, or `"model": "glm-5.2"` in `.claude/settings.local.json`. The Step 5A writer refuses to run while this is in place. |
 | That message names your main model (e.g. `glm-5.2`) | The Sonnet-tier resolution returned nothing and the classifier fell back to the main model — either `ANTHROPIC_DEFAULT_SONNET_MODEL` is set to an unrecognised ID (remove it), or a fable/mythos main model sent the classifier to the Opus tier, which this config points at glm-5.2. |
 | 401 | Key wrong or expired. Path A: re-run Step 4's probe, re-export a fresh key, re-run the Step 5A writer, and re-run the `HTTP 200` check before handing off. Path B: `ZG_API_KEY` not exported in the proxy terminal. A 401 also takes down the auto-mode classifier, so fix this before diagnosing any gate symptom. |
-| Model not found | Typo vs Step 2 list, or (Path B) model missing from `model_list`. |
+| Model not found | Typo vs the Step 1 list, or (Path B) model missing from `model_list`. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
 | Config edits ignored | Old session still running; or `claude` was launched from a directory other than the project holding `.claude/settings.local.json` (project config is scoped to that directory — use the `~/.0g/0g-settings.json` + `claude --settings` route for global use); or leftover `ANTHROPIC_*` in the global `env` or the shell — re-run Step 3. |

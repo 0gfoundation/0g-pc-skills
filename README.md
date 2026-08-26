@@ -21,32 +21,43 @@ Neither skill writes your API key anywhere you did not choose, and neither asks 
 
 ## Install — Claude Code
 
-Via plugin marketplace:
-
-```
-/plugin marketplace add 0gfoundation/0g-pc-skills
-/plugin install 0g-pc-skills@0g-pc-skills
-```
-
-Or manually (user-level, all projects):
+Paste this in a terminal, then open a new one:
 
 ```bash
-git clone https://github.com/0gfoundation/0g-pc-skills
-cp -r 0g-pc-skills/skills/0g-pc-model-config-claude ~/.claude/skills/
+mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL \
+  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-claude/SKILL.md \
+  -o ~/.claude/skills/0g-pc-model-config-claude/SKILL.md
 ```
 
-Then in any Claude Code session say **“set up 0G PC” / “接入 0G PC”** — or invoke explicitly with `/0g-pc-model-config-claude` if it doesn't trigger.
+A skill is a single `SKILL.md`, so that is the whole install — no repository left on your disk. In any session say **“set up 0G PC” / “接入 0G PC”**, or invoke it explicitly with `/0g-pc-model-config-claude`.
+
+**Just one project?** Put the same file in that project's `.claude/skills/0g-pc-model-config-claude/` instead of `~/.claude/skills/` — it then travels with the repo and is available only there.
+
+**Prefer plugins?** `/plugin marketplace add 0gfoundation/0g-pc-skills` then `/plugin install 0g-pc-skills@0g-pc-skills`. Same skill, with version management and `/plugin uninstall`. Use one or the other, not both — two copies of the same skill make it ambiguous which one fires.
+
+**Update:** re-run the curl. **Uninstall:** `rm -rf ~/.claude/skills/0g-pc-model-config-claude`.
 
 ## Install — Codex
 
-Codex discovers skills in `~/.codex/skills/`:
+Codex discovers skills in `~/.codex/skills/` (or `$CODEX_HOME/skills` if you set it). Paste this, then open a new terminal:
+
+```bash
+mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \
+  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-codex/SKILL.md \
+  -o ~/.codex/skills/0g-pc-model-config-codex/SKILL.md
+```
+
+Then in Codex say **“set up 0G PC in Codex” / “在 Codex 接入 0G PC”**. Codex has no per-project skills — `~/.codex/skills/` is the only location.
+
+**Update:** re-run the curl. **Uninstall:** `rm -rf ~/.codex/skills/0g-pc-model-config-codex`.
+
+## Read or modify the source
+
+Only if you want the specs and history — installing needs none of this:
 
 ```bash
 git clone https://github.com/0gfoundation/0g-pc-skills
-cp -r 0g-pc-skills/skills/0g-pc-model-config-codex ~/.codex/skills/
 ```
-
-Then in Codex say **“set up 0G PC in Codex” / “在 Codex 接入 0G PC”**.
 
 ## What you need
 

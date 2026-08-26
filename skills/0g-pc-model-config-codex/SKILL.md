@@ -152,7 +152,7 @@ Tool: **Bash**. Write it with this script — it validates the TOML in memory be
 
 ```bash
 python3 - <<'PY'
-import pathlib, shutil, sys
+import os, pathlib, shutil, sys
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -181,7 +181,10 @@ if tomllib is not None:
 else:
     print("note: python < 3.11, no tomllib — relying on the config-load check below")
 
-home = pathlib.Path.home() / ".codex"
+# Codex reads $CODEX_HOME when it is set — writing to ~/.codex regardless would put the
+# profile where Codex never looks, and Codex does not report a missing profile: it falls
+# back to its default provider and sends the request to OpenAI without a word.
+home = pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
 home.mkdir(parents=True, exist_ok=True)
 target = home / (NAME + ".config.toml")
 if target.is_file():
@@ -213,7 +216,16 @@ codex --profile zg-glm53
 codex exec --profile zg-glm53 "create hello.txt containing: hello from 0g, then cat it"
 ```
 
-Expected: Codex plans, runs the shell command, and reports the file content. The startup warning `Model metadata for glm-5.3 not found... fallback metadata` is harmless.
+**Tell the user to check the `model:` line in the startup banner every time**, and why:
+
+| `model:` shows | Meaning |
+|---|---|
+| `glm-5.3` (the model configured) | The profile loaded; requests go through the 0G bridge. |
+| `gpt-*` (e.g. `gpt-5.6-sol`) | **Stop.** The profile was not loaded and requests are going to `api.openai.com`. Codex does not report a missing profile — no error, no warning, the word "profile" does not appear in the output — it silently uses its own default. A user who is logged in to Codex gets a perfectly normal-looking answer from OpenAI. |
+
+This is worth more than any config-file check: it observes where the request actually went, not where a file was written. For a skill whose point is TEE-backed private inference, silently reaching OpenAI is a confidentiality failure that presents as success.
+
+Expected otherwise: Codex plans, runs the shell command, and reports the file content. The startup warning `Model metadata for glm-5.3 not found... fallback metadata` is harmless.
 
 If something fails, probe layer by layer (Tool: **Bash**) and match the first layer that breaks:
 
@@ -241,6 +253,7 @@ curl -s -N http://127.0.0.1:4000/v1/responses -H "Authorization: Bearer sk-anyth
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
 | `Error loading config.toml: <file>:L:C: ...` naming your profile file | The profile TOML is malformed. The Step 5 writer validates before writing; if the file was hand-edited since, re-run the writer. `codex doctor` will not surface this — it does not load profile files. |
 | `codex doctor` says config is fine but `--profile` fails | Expected: doctor reads only the base `config.toml`. Use the Step 5 config-load check (`env -u ZG_LITELLM_KEY codex exec --profile …`) to validate a profile. |
+| Startup banner shows `model: gpt-*`, or errors name `https://api.openai.com/...` | The profile was not found and Codex fell through to its default provider — silently. Check that the profile file sits in `$CODEX_HOME` (not `~/.codex`) if `CODEX_HOME` is set, and that `--profile` matches the filename. |
 | `--profile ... cannot be used while config.toml contains legacy [profiles.x]` | Old inline profile table present. Move it into a standalone `<name>.config.toml` (Step 5). |
 | 401 from the router | `ZG_API_KEY` not exported in the proxy terminal, or the key is invalid. |
 | Codex hangs with no request reaching LiteLLM | Proxy not running or wrong port — re-run the Step 4 health check. |

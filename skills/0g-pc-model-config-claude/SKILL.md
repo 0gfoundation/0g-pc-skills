@@ -119,38 +119,92 @@ rc, root = git("rev-parse", "--show-toplevel")
 root = pathlib.Path(root) if rc == 0 else pathlib.Path.cwd()
 target = root / ".claude" / "settings.local.json"
 
-# The key lands inside the repo, so git must be ignoring this file before it exists.
+# The key lands inside the repo, so git must be ignoring these paths before they exist.
+# The .bak and .tmp siblings carry the key too — a rule covering only the exact filename
+# would leave the backup committable.
 if rc == 0:
     rel = target.relative_to(root).as_posix()
-    if git("ls-files", "--error-unmatch", rel)[0] == 0:
-        sys.exit("%s is tracked by git — adding a key to it would stage a secret. "
-                 "Run `git rm --cached %s` first, then re-run this step." % (rel, rel))
-    if git("check-ignore", "-q", rel)[0] != 0:
+    guarded = [rel, rel + ".bak", rel + ".tmp"]
+    for path in guarded:
+        if git("ls-files", "--error-unmatch", path)[0] == 0:
+            sys.exit("%s is tracked by git — adding a key to it would stage a secret. "
+                     "Run `git rm --cached %s` first, then re-run this step." % (path, path))
+    if any(git("check-ignore", "-q", path)[0] != 0 for path in guarded):
         gi = root / ".gitignore"
         prev = gi.read_text() if gi.is_file() else ""
         with gi.open("a") as f:
             if prev and not prev.endswith("\n"):
                 f.write("\n")
-            f.write("\n# 0G PC config — contains an API key, never commit\n.claude/settings.local.json\n")
-        print("appended .claude/settings.local.json to", gi)
-    if git("check-ignore", "-q", rel)[0] != 0:
-        sys.exit("git still does not ignore %s — refusing to write a key into a tracked path" % rel)
+            f.write("\n# 0G PC config — contains an API key, never commit\n"
+                    ".claude/settings.local.json*\n")
+        print("appended .claude/settings.local.json* to", gi)
+    still = [path for path in guarded if git("check-ignore", "-q", path)[0] != 0]
+    if still:
+        sys.exit("git still does not ignore %s — refusing to write a key into a tracked path"
+                 % ", ".join(still))
 
-cfg = json.loads(target.read_text()) if target.is_file() else {}
-cfg.setdefault("env", {}).update({
-    "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
-    "ANTHROPIC_AUTH_TOKEN": key,
-    "ANTHROPIC_API_KEY": "",
-    "ANTHROPIC_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "0gm-1.0-35b-a3b",
-    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616",
-})
-cfg.setdefault("modelOverrides", {})["claude-sonnet-5"] = "0gm-1.0-35b-a3b"
-cfg.setdefault("permissions", {})["defaultMode"] = "auto"
+# The fragment this skill owns. Everything else already in the file is left alone.
+FRAGMENT = {
+    "env": {
+        "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
+        "ANTHROPIC_AUTH_TOKEN": key,
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_MODEL": "glm-5.2",
+        "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.2",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "0gm-1.0-35b-a3b",
+        "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616",
+    },
+    "modelOverrides": {"claude-sonnet-5": "0gm-1.0-35b-a3b"},
+    "permissions": {"defaultMode": "auto"},
+}
+KNOWN_TOP = {"env", "modelOverrides", "permissions"}
+KNOWN_ENV = {
+    "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+}
+
+# Claude Code ignores keys it does not recognise, silently — a typo here looks like success
+# and fails hours later. Catch it before anything reaches disk.
+unknown = sorted(set(FRAGMENT) - KNOWN_TOP)
+if unknown:
+    sys.exit("unknown top-level settings key(s): %s — refusing to write" % ", ".join(unknown))
+unknown = sorted(set(FRAGMENT["env"]) - KNOWN_ENV)
+if unknown:
+    sys.exit("unknown env var(s): %s — refusing to write" % ", ".join(unknown))
+
+# Never clobber a file that will not parse: it may be the user's own project config.
+raw = None
+cfg = {}
+if target.is_file():
+    raw = target.read_text()
+    try:
+        cfg = json.loads(raw)
+    except json.JSONDecodeError as e:
+        sys.exit("%s is not valid JSON (%s) — refusing to overwrite it; "
+                 "fix or move it, then re-run this step" % (target, e))
+    if not isinstance(cfg, dict):
+        sys.exit("%s does not hold a JSON object — refusing to overwrite it" % target)
+
+for k, v in FRAGMENT.items():
+    cfg.setdefault(k, {}).update(v)
+
+text = json.dumps(cfg, indent=2) + "\n"
+json.loads(text)          # validate the result in memory, before touching disk
+
+if raw is not None:
+    backup = pathlib.Path(str(target) + ".bak")
+    backup.write_text(raw)
+    print("backed up previous config to", backup)
+
 target.parent.mkdir(parents=True, exist_ok=True)
-target.write_text(json.dumps(cfg, indent=2) + "\n")
+tmp = pathlib.Path(str(target) + ".tmp")
+tmp.write_text(text)
+os.replace(tmp, target)   # atomic — a half-written config is never visible
+
+json.loads(target.read_text())   # read-back confirmation
 print("wrote", target)
 PY
 ```
@@ -168,6 +222,7 @@ Notes to apply, not to debate:
 
 - `modelOverrides` sets the permission-gate model and exists **only** in settings.json (no env-var equivalent). Do not substitute `ANTHROPIC_DEFAULT_SONNET_MODEL` — that replaces the whole slot and re-enables reasoning on the gate call.
 - `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is required; without it a 1M-context model is treated as 200K and compacts early.
+- The script validates **before** writing, not after: unknown top-level keys and unknown env var names abort the run, an unparseable existing file is never overwritten, and the write itself goes through a temp file plus `os.replace` so a half-written config is never visible. Validating after the write is useless — by then the user's previous config is already gone.
 - If using a different anthropic-format main model, change only the three main-model lines; keep the gate entries as-is.
 - **Scope:** a project-level file applies only inside that directory. If the user wants 0G in every project, write the same JSON to `~/.0g/0g-settings.json` instead (outside any repo, so the gitignore guard is not needed) and have them launch with `claude --settings ~/.0g/0g-settings.json` — worth an alias. Rollback is still one `rm`.
 

@@ -1,0 +1,7 @@
+# internal specs, source docs, and local git-history archive — never pushed
+spec/
+
+# local tooling artifacts
+.DS_Store
+*.skill
+.claude/

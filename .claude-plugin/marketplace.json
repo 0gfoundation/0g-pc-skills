@@ -1,0 +1,18 @@
+{
+  "name": "0g-pc-skills",
+  "owner": {
+    "name": "0G Foundation"
+  },
+  "metadata": {
+    "description": "Agent Skills that configure Claude Code and Codex to run on 0G Private Computer (router-api.0g.ai) with tested model combinations.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "0g-pc-skills",
+      "source": "./",
+      "description": "Set up 0G Private Computer as the model backend for Claude Code (direct or via LiteLLM) and for Codex (via LiteLLM bridge). Every config is end-to-end tested.",
+      "strict": false
+    }
+  ]
+}

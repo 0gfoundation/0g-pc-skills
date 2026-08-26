@@ -1,0 +1,236 @@
+---
+name: 0g-pc-model-config-claude
+description: Configure Claude Code to use 0G Private Computer (pc.0g.ai, router-api.0g.ai) as its model backend, with tested model combinations (glm-5.2 / glm-5.3 / kimi-k3 / qwen via LiteLLM) and a correctly configured permission-gate model. Use when the user wants to set up, connect, switch, or fix 0G PC / 0G Private Computer / 0G router models in Claude Code. Triggers include "set up 0G PC", "connect Claude Code to 0G", "use 0G models in Claude Code", "接入 0G PC", "配置 0G", "把 Claude Code 接到 0G", "用 0G 的模型", "0G 配置不工作".
+---
+
+# 0G PC Setup for Claude Code
+
+Configure Claude Code to run on 0G Private Computer's inference API. Every config in this skill was verified end-to-end on 2026-08-26 (Claude Code 2.1.246, LiteLLM 1.98.0). Follow it exactly — do not improvise config values.
+
+## Hard rules (read first)
+
+1. **Keep the key out of the chat.** Default flow: write configs with the literal placeholder `YOUR_API_KEY` and have the user replace it themselves in their own editor — the key then never enters the conversation at all. Only if the user explicitly asks you to fill it in ("你帮我填" / "fill it in for me"): accept the pasted key, write it directly into the target file, never echo or repeat it, and refer to it only as "your key" afterwards. Never write a real key into any file inside a git repository, and never construct shell commands that contain the key (the command line itself would enter the transcript).
+2. **Only use configs from this skill.** They are tested; improvised combinations fail in ways that are hard to diagnose (see "Why the gate model matters" below).
+3. **Permission-gate iron rule:** the `modelOverrides` and `ANTHROPIC_DEFAULT_HAIKU_MODEL` entries must point to a fast non-reasoning model (`0gm-1.0-35b-a3b`). Never put a reasoning model (glm-5.2, glm-5.3, kimi-k3) there. Reason: in auto mode, every non-read-only action triggers a yes/no safety call on that slot; a reasoning model turns it into a ~950-token reasoning pass, times out, and every Bash/git/network action fails with "model is temporarily unavailable" while chat still works.
+4. **This skill cannot switch the current session.** Config edits take effect on the next `claude` launch. Finish by telling the user to restart and run the verification steps — do not claim the current session now uses 0G.
+
+## Workflow
+
+### Step 1 — Ask two questions
+
+Ask the user (briefly, not a questionnaire):
+
+1. "Is your code/data confidential (must run fully inside TEE enclaves)?" → If yes: use **Path A** with a **Private**-mode key (note: only 3 models available, no failover; tell the user this trade-off).
+2. "Which main model do you want?" → `glm-5.2` (or another anthropic-format model) → **Path A (direct)**. `glm-5.3` / `kimi-k3` / `qwen3.8-max` / other openai-only models → **Path B (via LiteLLM)**.
+
+If the user has no preference: default to Path A with `glm-5.2`.
+
+### Step 2 — Check the live model list
+
+Tool: **Bash**
+
+```bash
+curl -s https://router-api.0g.ai/v1/models | jq -r \
+  '.data[] | [.id, (.supported_formats|join("+")), (.verifiability // "-"), (.context_length|tostring)] | @tsv'
+```
+
+If `jq` is not installed, use this instead (macOS ships python3):
+
+```bash
+curl -s https://router-api.0g.ai/v1/models | python3 -c "import json,sys; [print(m['id'], '+'.join(m.get('supported_formats',[])), m.get('verifiability','-'), m.get('context_length')) for m in json.load(sys.stdin)['data']]"
+```
+
+Expected output: a table of model IDs, formats, TEE type, context length. Confirm the chosen main model exists and note its `supported_formats`:
+
+- contains `anthropic` → Path A works (direct connection).
+- `openai` only → Path B required (LiteLLM translation).
+
+Also confirm `0gm-1.0-35b-a3b` is listed (it is the gate model for both paths). If the endpoint is unreachable, stop and report — do not proceed on a stale model list.
+
+### Step 3 — Inspect existing config
+
+Tool: **Read** `~/.claude/settings.json` (if it exists).
+
+- If `env` already contains `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, or any `ANTHROPIC_DEFAULT_*_MODEL` from a previous provider (Kimi, GLM, etc.): tell the user which keys will be replaced, and preserve all unrelated settings (hooks, plugins, permissions, statusLine…).
+- Also warn the user to check `~/.zshrc` / `~/.bashrc` for stale `ANTHROPIC_*` exports — `settings.json` `env` overrides shell exports, but leftovers cause confusion when the file is removed later.
+
+### Step 4 — Get the API key (without seeing it)
+
+Tell the user: create an inference key (starts with `sk-`) at pc.0g.ai → Dashboard → API Keys, and keep it on their clipboard — **do not paste it into this chat**. For confidential mode (Path A + Private), tell them to select the **Private** trust mode when creating the key.
+
+The configs in Step 5 are written with the literal placeholder `YOUR_API_KEY`; the user swaps it in themselves at hand-off (Step 6). If the user explicitly asks you to fill it in instead, follow hard rule 1's fallback.
+
+### Step 5A — Path A: direct connection (main model glm-5.2)
+
+Tool: **Edit** (or **Write** if the file does not exist) `~/.claude/settings.json`. Merge these keys into the existing JSON, keeping the literal `YOUR_API_KEY` placeholder:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
+    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY",
+    "ANTHROPIC_API_KEY": "",
+
+    "ANTHROPIC_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "0gm-1.0-35b-a3b",
+
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616"
+  },
+  "modelOverrides": {
+    "claude-sonnet-5": "0gm-1.0-35b-a3b"
+  },
+  "permissions": { "defaultMode": "auto" }
+}
+```
+
+Notes to apply, not to debate:
+
+- `modelOverrides` sets the permission-gate model and exists **only** in settings.json (no env-var equivalent). Do not substitute `ANTHROPIC_DEFAULT_SONNET_MODEL` — that replaces the whole slot and re-enables reasoning on the gate call.
+- `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is required; without it a 1M-context model is treated as 200K and compacts early.
+- If using a different anthropic-format main model, change only the three main-model lines; keep the gate entries as-is.
+
+Then go to Step 6.
+
+### Step 5B — Path B: via LiteLLM (main model glm-5.3 / kimi-k3 / qwen3.8-max / minimax-m3)
+
+Create a dedicated directory outside any git repository.
+
+Tool: **Bash**
+
+```bash
+mkdir -p ~/.0g-litellm
+```
+
+Tool: **Write** `~/.0g-litellm/litellm-config.yaml`:
+
+```yaml
+model_list:
+  - model_name: glm-5.3
+    litellm_params:
+      model: hosted_vllm/glm-5.3           # prefix MUST be hosted_vllm/ (openai/ routes to a nonexistent /v1/responses -> 404)
+      api_base: https://router-api.0g.ai/v1
+      api_key: os.environ/ZG_API_KEY
+      use_chat_completions_api: true
+      additional_drop_params: ["reasoning_effort"]   # router rejects the object form with HTTP 400
+  - model_name: kimi-k3
+    litellm_params:
+      model: hosted_vllm/kimi-k3
+      api_base: https://router-api.0g.ai/v1
+      api_key: os.environ/ZG_API_KEY
+      use_chat_completions_api: true
+      additional_drop_params: ["reasoning_effort"]
+  - model_name: qwen3.8-max
+    litellm_params:
+      model: hosted_vllm/qwen3.8-max
+      api_base: https://router-api.0g.ai/v1
+      api_key: os.environ/ZG_API_KEY
+      use_chat_completions_api: true
+      additional_drop_params: ["reasoning_effort"]
+  - model_name: 0gm-1.0-35b-a3b            # gate model goes through the proxy too: one BASE_URL per session
+    litellm_params:
+      model: hosted_vllm/0gm-1.0-35b-a3b
+      api_base: https://router-api.0g.ai/v1
+      api_key: os.environ/ZG_API_KEY
+      use_chat_completions_api: true
+      additional_drop_params: ["reasoning_effort"]
+
+litellm_settings:
+  num_retries: 2
+  callbacks: zg_patch.zg_patch_instance
+```
+
+Tool: **Write** `~/.0g-litellm/zg_patch.py`:
+
+```python
+"""Workaround: 0G Router ends every stream with a billing chunk whose "choices" is [],
+and LiteLLM's Responses-API bridge crashes on it (choices[0] IndexError).
+Loaded via litellm_settings.callbacks; remove once fixed upstream in LiteLLM."""
+from litellm.integrations.custom_logger import CustomLogger
+from litellm.responses.litellm_completion_transformation import streaming_iterator as _si
+
+_orig = _si.LiteLLMCompletionStreamingIterator._get_delta_string_from_streaming_choices
+
+def _safe(self, choices):
+    if not choices:
+        return ""
+    return _orig(self, choices)
+
+_si.LiteLLMCompletionStreamingIterator._get_delta_string_from_streaming_choices = _safe
+
+class _Noop(CustomLogger):
+    pass
+
+zg_patch_instance = _Noop()
+```
+
+Tell the user to start the proxy in a separate terminal (it must keep running; first launch takes 1–2 min to install dependencies):
+
+```bash
+cd ~/.0g-litellm
+export ZG_API_KEY="sk-...your key..."
+uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
+```
+
+(If `uvx` is unavailable, alternative: `pip install 'litellm[proxy]==1.98.0'` then `litellm --config litellm-config.yaml --port 4000` from the same directory. Pin 1.98.0 — it is the tested version.)
+
+Then Tool: **Edit**/**Write** `~/.claude/settings.json` (merge, preserving unrelated keys); the main model below is `glm-5.3` — substitute the user's chosen model name in the three main-model lines:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4000",
+    "ANTHROPIC_AUTH_TOKEN": "sk-anything",
+    "ANTHROPIC_API_KEY": "",
+
+    "ANTHROPIC_MODEL": "glm-5.3",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "0gm-1.0-35b-a3b",
+
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616"
+  },
+  "modelOverrides": {
+    "claude-sonnet-5": "0gm-1.0-35b-a3b"
+  },
+  "permissions": { "defaultMode": "auto" }
+}
+```
+
+`ANTHROPIC_AUTH_TOKEN` is a placeholder — the local proxy does not authenticate; the real key lives only in the `ZG_API_KEY` environment variable of the proxy terminal.
+
+### Step 6 — Hand off: restart + verify
+
+Tell the user, verbatim in substance:
+
+1. Open `~/.claude/settings.json` in their own editor (e.g. `code ~/.claude/settings.json` or `nano ~/.claude/settings.json`) and replace `YOUR_API_KEY` with their real key, then save. (Path B: the key goes into the proxy terminal's `export ZG_API_KEY=...` instead — the settings.json placeholder `sk-anything` stays as-is.) Doing this themselves keeps the key out of the conversation entirely.
+2. Restart Claude Code (close all windows, open a new terminal, run `claude`). Config changes do not affect the current session.
+3. In the new session, type `/status` — the Base URL must show `https://router-api.0g.ai` (Path A) or `http://127.0.0.1:4000` (Path B). The startup warning `[claude-code:unrecognized_model]` is harmless.
+4. Ask the new session to run one gated action, e.g. "use Bash to run `echo ok > probe.txt && cat probe.txt`". Success with no "temporarily unavailable" error proves the gate path works.
+
+If something fails, run these probes (Tool: **Bash**) and match the layer that breaks:
+
+```bash
+# Layer 1 — router reachable with the key (expect: HTTP 200)
+curl -s https://router-api.0g.ai/v1/chat/completions -H "Authorization: Bearer $ZG_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"ping"}],"max_tokens":600}' \
+  -w '\nHTTP %{http_code}\n' | tail -1
+
+# Layer 2 (Path B only) — LiteLLM anthropic endpoint (expect: HTTP 200)
+curl -s http://127.0.0.1:4000/v1/messages -H "x-api-key: sk-anything" \
+  -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
+  -d '{"model":"glm-5.3","max_tokens":64,"messages":[{"role":"user","content":"ping"}]}' \
+  -w '\nHTTP %{http_code}\n' | tail -1
+```
+
+## Troubleshooting map
+
+| Symptom | Cause → fix |
+|---|---|
+| Auto mode: "xxx is temporarily unavailable, cannot determine the safety of …" | Gate model wrong. Point `modelOverrides` + `ANTHROPIC_DEFAULT_HAIKU_MODEL` at `0gm-1.0-35b-a3b` (hard rule 3). |
+| 401 | Wrong/absent key: Path A → `ANTHROPIC_AUTH_TOKEN`; Path B → `ZG_API_KEY` not exported in the proxy terminal. |
+| Model not found | Typo vs Step 2 list, or (Path B) model missing from `model_list`. |
+| LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
+| Config edits ignored | Old session still running, or leftover `ANTHROPIC_*` in `env` overriding — re-run Step 3. |

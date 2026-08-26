@@ -9,7 +9,7 @@ Configure Claude Code to run on 0G Private Computer's inference API. Every confi
 
 ## Hard rules (read first)
 
-1. **Keep the key out of the chat.** Default flow: write configs with the literal placeholder `YOUR_API_KEY` and have the user replace it themselves in their own editor — the key then never enters the conversation at all. Only if the user explicitly asks you to fill it in ("你帮我填" / "fill it in for me"): accept the pasted key, write it directly into the target file, never echo or repeat it, and refer to it only as "your key" afterwards. Never write a real key into any file inside a git repository, and never construct shell commands that contain the key (the command line itself would enter the transcript).
+1. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. Resolve the key in this order: (1) the `ZG_API_KEY` environment variable; (2) a `ZG_API_KEY=` line in the project's `.env`; (3) ask the user to `export ZG_API_KEY='sk-…'` and continue. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not.
 2. **Only use configs from this skill.** They are tested; improvised combinations fail in ways that are hard to diagnose (see "Why the gate model matters" below).
 3. **Permission-gate iron rule:** the `modelOverrides` and `ANTHROPIC_DEFAULT_HAIKU_MODEL` entries must point to a fast non-reasoning model (`0gm-1.0-35b-a3b`). Never put a reasoning model (glm-5.2, glm-5.3, kimi-k3) there. Reason: in auto mode, every non-read-only action triggers a yes/no safety call on that slot; a reasoning model turns it into a ~950-token reasoning pass, times out, and every Bash/git/network action fails with "model is temporarily unavailable" while chat still works.
 4. **This skill cannot switch the current session.** Config edits take effect on the next `claude` launch. Finish by telling the user to restart and run the verification steps — do not claim the current session now uses 0G.
@@ -54,21 +54,30 @@ Tool: **Read** `~/.claude/settings.json` (if it exists).
 - If `env` already contains `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, or any `ANTHROPIC_DEFAULT_*_MODEL` from a previous provider (Kimi, GLM, etc.): tell the user which keys will be replaced, and preserve all unrelated settings (hooks, plugins, permissions, statusLine…).
 - Also warn the user to check `~/.zshrc` / `~/.bashrc` for stale `ANTHROPIC_*` exports — `settings.json` `env` overrides shell exports, but leftovers cause confusion when the file is removed later.
 
-### Step 4 — Get the API key (without seeing it)
+### Step 4 — Resolve the API key (never see it, never fake it)
 
-Tell the user: create an inference key (starts with `sk-`) at pc.0g.ai → Dashboard → API Keys, and keep it on their clipboard — **do not paste it into this chat**. For confidential mode (Path A + Private), tell them to select the **Private** trust mode when creating the key.
+Tool: **Bash**. Probe for a key without reading its value — both commands report presence and length only:
 
-The configs in Step 5 are written with the literal placeholder `YOUR_API_KEY`; the user swaps it in themselves at hand-off (Step 6). If the user explicitly asks you to fill it in instead, follow hard rule 1's fallback.
+```bash
+[ -n "$ZG_API_KEY" ] && echo "env ZG_API_KEY: present (${#ZG_API_KEY} chars)" || echo "env ZG_API_KEY: absent"
+grep -q '^ZG_API_KEY=' .env 2>/dev/null && echo ".env: has ZG_API_KEY" || echo ".env: no ZG_API_KEY"
+```
+
+If neither reports a key, stop and tell the user:
+
+> Create an inference key (starts with `sk-`) at pc.0g.ai → Dashboard → API Keys. For confidential mode (Path A + Private), select the **Private** trust mode when creating it. Then run ` export ZG_API_KEY='sk-…'` in this shell — the leading space keeps it out of shell history — and tell me to continue.
+
+**Do not advance to Step 5 without a key.** Hard rule 1 forbids writing a placeholder, so with no key there is nothing to write; say that plainly rather than producing a file that will 401.
 
 ### Step 5A — Path A: direct connection (main model glm-5.2)
 
-Tool: **Edit** (or **Write** if the file does not exist) `~/.claude/settings.json`. Merge these keys into the existing JSON, keeping the literal `YOUR_API_KEY` placeholder:
+This is the shape the config takes (`ANTHROPIC_AUTH_TOKEN` is filled in by the writer script below, from the environment — never typed by hand):
 
 ```json
 {
   "env": {
     "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
-    "ANTHROPIC_AUTH_TOKEN": "YOUR_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN": "<injected from $ZG_API_KEY>",
     "ANTHROPIC_API_KEY": "",
 
     "ANTHROPIC_MODEL": "glm-5.2",
@@ -83,6 +92,51 @@ Tool: **Edit** (or **Write** if the file does not exist) `~/.claude/settings.jso
   },
   "permissions": { "defaultMode": "auto" }
 }
+```
+
+Tool: **Bash**. Write it with this script — **not** with Edit/Write. The script is the only thing that ever touches the key value, so the key never reaches your context or a tool result, and it refuses to produce a file when no key resolves:
+
+```bash
+python3 - <<'PY'
+import json, os, pathlib, re, sys
+
+key = os.environ.get("ZG_API_KEY", "").strip()
+if not key:
+    env = pathlib.Path(".env")
+    if env.is_file():
+        m = re.search(r'^ZG_API_KEY=(.+)$', env.read_text(), re.M)
+        if m:
+            key = m.group(1).strip().strip('"').strip("'")
+if not key:
+    sys.exit("no ZG_API_KEY resolved — refusing to write a placeholder config (hard rule 1)")
+
+target = pathlib.Path.home() / ".claude" / "settings.json"
+cfg = json.loads(target.read_text()) if target.is_file() else {}
+cfg.setdefault("env", {}).update({
+    "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
+    "ANTHROPIC_AUTH_TOKEN": key,
+    "ANTHROPIC_API_KEY": "",
+    "ANTHROPIC_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "0gm-1.0-35b-a3b",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616",
+})
+cfg.setdefault("modelOverrides", {})["claude-sonnet-5"] = "0gm-1.0-35b-a3b"
+cfg.setdefault("permissions", {})["defaultMode"] = "auto"
+target.parent.mkdir(parents=True, exist_ok=True)
+target.write_text(json.dumps(cfg, indent=2) + "\n")
+print("wrote", target)
+PY
+```
+
+Then prove the key actually works before handing off — this is the check that turns "written" into "verified" (expect `HTTP 200`; `401` means the key is wrong or expired, and the config is not done):
+
+```bash
+curl -s https://router-api.0g.ai/v1/chat/completions \
+  -H "Authorization: Bearer $ZG_API_KEY" -H "content-type: application/json" \
+  -d '{"model":"glm-5.2","messages":[{"role":"user","content":"ping"}],"max_tokens":600}' \
+  -o /dev/null -w 'HTTP %{http_code}\n'
 ```
 
 Notes to apply, not to debate:
@@ -204,7 +258,7 @@ Then Tool: **Edit**/**Write** `~/.claude/settings.json` (merge, preserving unrel
 
 Tell the user, verbatim in substance:
 
-1. Open `~/.claude/settings.json` in their own editor (e.g. `code ~/.claude/settings.json` or `nano ~/.claude/settings.json`) and replace `YOUR_API_KEY` with their real key, then save. (Path B: the key goes into the proxy terminal's `export ZG_API_KEY=...` instead — the settings.json placeholder `sk-anything` stays as-is.) Doing this themselves keeps the key out of the conversation entirely.
+1. The config is already complete — the key was injected from `ZG_API_KEY` in Step 5 and the `HTTP 200` probe confirmed it works. There is nothing left to fill in by hand. (Path B: the settings.json token stays `sk-anything`; the real key lives only in the proxy terminal's `export ZG_API_KEY=…`.)
 2. Restart Claude Code (close all windows, open a new terminal, run `claude`). Config changes do not affect the current session.
 3. In the new session, type `/status` — the Base URL must show `https://router-api.0g.ai` (Path A) or `http://127.0.0.1:4000` (Path B). The startup warning `[claude-code:unrecognized_model]` is harmless.
 4. Ask the new session to run one gated action, e.g. "use Bash to run `echo ok > probe.txt && cat probe.txt`". Success with no "temporarily unavailable" error proves the gate path works.
@@ -230,7 +284,7 @@ curl -s http://127.0.0.1:4000/v1/messages -H "x-api-key: sk-anything" \
 | Symptom | Cause → fix |
 |---|---|
 | Auto mode: "xxx is temporarily unavailable, cannot determine the safety of …" | Gate model wrong. Point `modelOverrides` + `ANTHROPIC_DEFAULT_HAIKU_MODEL` at `0gm-1.0-35b-a3b` (hard rule 3). |
-| 401 | Wrong/absent key: Path A → `ANTHROPIC_AUTH_TOKEN`; Path B → `ZG_API_KEY` not exported in the proxy terminal. |
+| 401 | Key wrong or expired. Path A: re-run Step 4's probe, re-export a fresh key, re-run the Step 5A writer, and re-run the `HTTP 200` check before handing off. Path B: `ZG_API_KEY` not exported in the proxy terminal. A 401 also takes down the auto-mode classifier, so fix this before diagnosing any gate symptom. |
 | Model not found | Typo vs Step 2 list, or (Path B) model missing from `model_list`. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
 | Config edits ignored | Old session still running, or leftover `ANTHROPIC_*` in `env` overriding — re-run Step 3. |

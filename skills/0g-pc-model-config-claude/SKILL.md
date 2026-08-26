@@ -9,10 +9,14 @@ Configure Claude Code to run on 0G Private Computer's inference API. Every confi
 
 ## Hard rules (read first)
 
-1. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. Resolve the key in this order: (1) the `ZG_API_KEY` environment variable; (2) a `ZG_API_KEY=` line in the project's `.env`; (3) ask the user to `export ZG_API_KEY='sk-…'` and continue. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not. The key lands in a file inside the user's repository, so it may only be written once git is confirmed to be ignoring that file — the writer script in Step 5 enforces this and aborts if it cannot.
-2. **Only use configs from this skill.** They are tested; improvised combinations fail in ways that are hard to diagnose — the permission-gate entries in particular (hard rule 3).
-3. **Permission-gate iron rule:** in auto mode the safety classifier resolves through the **Sonnet** tier — not Haiku. On a third-party router that means `ANTHROPIC_DEFAULT_SONNET_MODEL` when it is set *and* the value is recognised, otherwise the built-in `claude-sonnet-5` mapped through `modelOverrides`. So `modelOverrides["claude-sonnet-5"]` must point at a fast non-reasoning model (`0gm-1.0-35b-a3b`), never at a reasoning model (glm-5.2, glm-5.3, kimi-k3): every non-read-only action triggers a yes/no safety call on that slot, and a reasoning model turns it into a ~950-token reasoning pass that times out — every Bash/git/network action then fails with "model is temporarily unavailable" while chat keeps working. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is *not* the gate; it is kept on a fast model for unrelated background work.
-4. **Never write to `~/.claude/settings.json`.** That file carries the user's hooks, statusLine, plugins, and their `/model` choice; merging a provider config into it entangles two unrelated things and makes rollback a manual un-merge. Write the project-level `.claude/settings.local.json` instead (verified to carry `env` and `modelOverrides`), or — when the user wants 0G across projects — a standalone `~/.0g/0g-settings.json` they load with `claude --settings`. Either way rollback is deleting one file. Read the global file freely; never modify it.
+1. **Never modify `~/.claude/settings.json`, and default to project scope.** Two parts, and only the first is absolute:
+   - **Absolute:** the user's global settings file — their hooks, statusLine, plugins, `/model` choice — is **read, never written**, whatever scope they pick. A failed setup must not be able to damage anything they configured.
+   - **Default:** the config goes to `<repo root>/.claude/settings.local.json`. Rollback is deleting one file.
+   - The user *may* choose to have 0G apply everywhere (Step 2, question 3). Honour it — but it is theirs to ask for, never your default and never silent: it goes to a standalone `~/.0g/0g-settings.json` loaded with `claude --settings`, which still leaves `~/.claude/settings.json` untouched.
+   **State this to the user before asking anything** (Step 2); they should not have to infer it from the result.
+2. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. Resolve the key in this order: (1) the `ZG_API_KEY` environment variable; (2) a `ZG_API_KEY=` line in the project's `.env`; (3) ask the user to `export ZG_API_KEY='sk-…'` and continue. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not. The key lands in a file inside the user's repository, so it may only be written once git is confirmed to be ignoring that file — the writer script in Step 5 enforces this and aborts if it cannot.
+3. **Only use configs from this skill.** They are tested; improvised combinations fail in ways that are hard to diagnose — the permission-gate entries in particular (hard rule 4).
+4. **Permission-gate iron rule:** in auto mode the safety classifier resolves through the **Sonnet** tier — not Haiku. On a third-party router that means `ANTHROPIC_DEFAULT_SONNET_MODEL` when it is set *and* the value is recognised, otherwise the built-in `claude-sonnet-5` mapped through `modelOverrides`. So `modelOverrides["claude-sonnet-5"]` must point at a fast non-reasoning model (`0gm-1.0-35b-a3b`), never at a reasoning model (glm-5.2, glm-5.3, kimi-k3): every non-read-only action triggers a yes/no safety call on that slot, and a reasoning model turns it into a ~950-token reasoning pass that times out — every Bash/git/network action then fails with "model is temporarily unavailable" while chat keeps working. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is *not* the gate; it is kept on a fast model for unrelated background work.
 5. **This skill cannot switch the current session.** Config edits take effect on the next `claude` launch. Finish by telling the user to restart and run the verification steps — do not claim the current session now uses 0G.
 
 ## Workflow
@@ -47,13 +51,17 @@ That grouping is illustrative — always print what the live call returned, neve
 
 Also confirm `0gm-1.0-35b-a3b` is listed (it is the gate model for both paths). If the endpoint is unreachable, **stop and report** — do not proceed on a stale model list, and do not start asking questions.
 
-### Step 2 — Ask five questions
+### Step 2 — State the guarantee, then ask five questions
 
-With the list on screen, ask all five at once. Every one has a default, so a user with no opinions answers by nodding once.
+**First, say this to the user — before any question:**
+
+> Your global `~/.claude/settings.json` — hooks, plugins, status line, your `/model` choice — will be read but never modified, whichever scope you pick. By default the config goes into `.claude/settings.local.json` in this project, and undoing it is deleting that one file. If you'd rather have 0G apply to every project, say so at question 3 and it goes into a standalone file instead — still not your global settings.
+
+Then, with the model list on screen, ask all five at once. Every one has a default, so a user with no opinions answers by nodding once.
 
 1. **Confidential?** Does the code/data have to run fully inside TEE enclaves? → yes means **Path A** with a **Private**-mode key (trade-off: only 3 models, no failover — say so). *Default: no.*
 2. **Main model?** Pick from the Step 1 table. Anthropic-format → **Path A (direct)**; openai-only → **Path B (via LiteLLM)**. *Default: `glm-5.2` (Path A).*
-3. **Scope?** This project only, or every project? Project-only writes `.claude/settings.local.json` and needs no launch flag. Every-project writes `~/.0g/0g-settings.json`, which lives outside any repo but has to be loaded with `claude --settings ~/.0g/0g-settings.json`. *Default: this project only.*
+3. **Scope?** This project, or every project? *Default: this project* — writes `.claude/settings.local.json`, no launch flag needed, `rm` to undo. Every-project writes `~/.0g/0g-settings.json`, loaded with `claude --settings ~/.0g/0g-settings.json` (worth an alias); it sits outside every repo, so the key never lands in a working tree, and `~/.claude/settings.json` is still untouched. Only offer this because they asked — never steer toward it.
 4. **Permission mode?** State both costs — do not set this silently:
    - `acceptEdits` *(default)* — file edits pass automatically, Bash asks each time. No dependency on the safety classifier, so a router hiccup cannot take the session down.
    - `auto` — the classifier judges non-read-only actions, so far fewer confirmations; but it is an extra request against the router, and if it fails (router wobble, a `[1m]` model name, an expired key) Claude Code fails closed and refuses **every** non-read-only tool. Choose this only if the gate config in Step 5A has been verified.
@@ -61,7 +69,7 @@ With the list on screen, ask all five at once. Every one has a default, so a use
 
 ### Step 3 — Inspect existing config (read only — never modify it)
 
-Tool: **Read** `~/.claude/settings.json` and `<project>/.claude/settings.json` if they exist. Both are inspected for conflicts; **neither is written** (hard rule 4).
+Tool: **Read** `~/.claude/settings.json` and `<project>/.claude/settings.json` if they exist. Both are inspected for conflicts; **neither is written** (hard rule 1).
 
 - If either `env` already contains `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_MODEL`, or any `ANTHROPIC_DEFAULT_*_MODEL` from a previous provider (Kimi, GLM, etc.): tell the user those values will be shadowed by the project-level file this skill writes, and that removing them is their call — leftovers in the global file are the usual reason a later rollback appears not to work.
 - Also warn the user to check `~/.zshrc` / `~/.bashrc` for stale `ANTHROPIC_*` exports — settings `env` overrides shell exports, but leftovers cause confusion when the config file is removed later.
@@ -79,7 +87,7 @@ If neither reports a key, stop and tell the user:
 
 > Create an inference key (starts with `sk-`) at pc.0g.ai → Dashboard → API Keys. For confidential mode (Path A + Private), select the **Private** trust mode when creating it. Then run ` export ZG_API_KEY='sk-…'` in this shell — the leading space keeps it out of shell history — and tell me to continue.
 
-**Do not advance to Step 5 without a key.** Hard rule 1 forbids writing a placeholder, so with no key there is nothing to write; say that plainly rather than producing a file that will 401.
+**Do not advance to Step 5 without a key.** Hard rule 2 forbids writing a placeholder, so with no key there is nothing to write; say that plainly rather than producing a file that will 401.
 
 ### Step 5A — Path A: direct connection (main model glm-5.2)
 
@@ -120,7 +128,7 @@ if not key:
         if m:
             key = m.group(1).strip().strip('"').strip("'")
 if not key:
-    sys.exit("no ZG_API_KEY resolved — refusing to write a placeholder config (hard rule 1)")
+    sys.exit("no ZG_API_KEY resolved — refusing to write a placeholder config (hard rule 2)")
 
 def git(*args):
     r = subprocess.run(("git",) + args, capture_output=True, text=True)
@@ -265,7 +273,7 @@ Notes to apply, not to debate:
 - The `[1m]` guard reads the config files only. It cannot see a `claude --model 'something[1m]'` launched by hand — if the symptom appears anyway, check how the session was started.
 - The script validates **before** writing, not after: unknown top-level keys and unknown env var names abort the run, an unparseable existing file is never overwritten, and the write itself goes through a temp file plus `os.replace` so a half-written config is never visible. Validating after the write is useless — by then the user's previous config is already gone.
 - If using a different anthropic-format main model, change only the three main-model lines; keep the gate entries as-is.
-- **Scope:** a project-level file applies only inside that directory. If the user wants 0G in every project, write the same JSON to `~/.0g/0g-settings.json` instead (outside any repo, so the gitignore guard is not needed) and have them launch with `claude --settings ~/.0g/0g-settings.json` — worth an alias. Rollback is still one `rm`.
+- **Scope:** a project-level file applies only inside that directory — that is the default and the recommended shape. If the user asked for every-project scope at question 3, write the same JSON to `~/.0g/0g-settings.json` instead: it lives outside every repo, so the gitignore guard is unnecessary and the key never sits in a working tree. Rollback is still one `rm`. Either way `~/.claude/settings.json` is never written — hard rule 1.
 
 Then go to Step 6.
 
@@ -405,10 +413,10 @@ curl -s http://127.0.0.1:4000/v1/messages -H "x-api-key: sk-anything" \
 
 | Symptom | Cause → fix |
 |---|---|
-| Auto mode: "xxx is temporarily unavailable, cannot determine the safety of …" | Read the model name in the message — it names the classifier model, and the fix follows from it. Gate model wrong: point `modelOverrides["claude-sonnet-5"]` at `0gm-1.0-35b-a3b` (hard rule 3 — Sonnet tier, not Haiku). |
+| Auto mode: "xxx is temporarily unavailable, cannot determine the safety of …" | Read the model name in the message — it names the classifier model, and the fix follows from it. Gate model wrong: point `modelOverrides["claude-sonnet-5"]` at `0gm-1.0-35b-a3b` (hard rule 4 — Sonnet tier, not Haiku). |
 | That message names a model with a `[1m]` suffix (e.g. `0gm-1.0-35b-a3b[1m]`) | The session model carries `[1m]` and Claude Code copied the tag onto the derived classifier model; the router does not serve that ID. Drop the tag: `/model` without the (1M context) variant, or `"model": "glm-5.2"` in `.claude/settings.local.json`. The Step 5A writer refuses to run while this is in place. |
 | That message names your main model (e.g. `glm-5.2`) | The Sonnet-tier resolution returned nothing and the classifier fell back to the main model — either `ANTHROPIC_DEFAULT_SONNET_MODEL` is set to an unrecognised ID (remove it), or a fable/mythos main model sent the classifier to the Opus tier, which this config points at glm-5.2. |
 | 401 | Key wrong or expired. Path A: re-run Step 4's probe, re-export a fresh key, re-run the Step 5A writer, and re-run the `HTTP 200` check before handing off. Path B: `ZG_API_KEY` not exported in the proxy terminal. A 401 also takes down the auto-mode classifier, so fix this before diagnosing any gate symptom. |
 | Model not found | Typo vs the Step 1 list, or (Path B) model missing from `model_list`. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
-| Config edits ignored | Old session still running; or `claude` was launched from a directory other than the project holding `.claude/settings.local.json` (project config is scoped to that directory — use the `~/.0g/0g-settings.json` + `claude --settings` route for global use); or leftover `ANTHROPIC_*` in the global `env` or the shell — re-run Step 3. |
+| Config edits ignored | Old session still running; or `claude` was launched from a directory other than the project holding `.claude/settings.local.json` (project config is scoped to that directory by design — either run the skill in the other project, or switch to the every-project scope from Step 2 question 3); or leftover `ANTHROPIC_*` in the global `env` or the shell — re-run Step 3. |

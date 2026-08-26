@@ -11,12 +11,18 @@ Why a bridge is mandatory (state this once to the user, then move on): Codex ≥
 
 ## Hard rules (read first)
 
-1. **Never echo, log, or repeat the user's API key.** It goes only into the `ZG_API_KEY` environment variable of the proxy terminal. Never write it into any file inside a git repository. Note that `ZG_LITELLM_KEY="sk-anything"` in Step 6 is **not** a placeholder waiting to be filled in — the local proxy performs no authentication, so any string works. Leave it alone; the real key lives only in the proxy terminal.
-2. **Never write to `~/.codex/config.toml`.** That file carries the user's other providers, approval policy, and MCP servers; appending to it makes rollback a manual un-append. Everything this skill needs — the profile *and* the `[model_providers.zg]` block — fits in a standalone `~/.codex/<name>.config.toml`, verified to load with no base `config.toml` present at all. Rollback is deleting one file. Read the base file freely; never modify it.
+1. **Never modify `~/.codex/config.toml`.** That file carries the user's other providers, approval policy, and MCP servers; appending to it makes rollback a manual un-append. Everything this skill needs — the profile *and* the `[model_providers.zg]` block — fits in a standalone `~/.codex/<name>.config.toml`, verified to load with no base `config.toml` present at all. Rollback is deleting one file. Read the base file freely; never modify it. **Be straight with the user about what this does and does not promise** (see the note below Workflow): Codex has no project-level config discovery — profiles are only found in `$CODEX_HOME` — so unlike the Claude Code skill, this one cannot keep its output inside the project. What it can promise is that nothing they already configured is edited, and that removing one added file undoes everything. Do not dress that up as project scoping.
+2. **Never echo, log, or repeat the user's API key.** It goes only into the `ZG_API_KEY` environment variable of the proxy terminal. Never write it into any file inside a git repository. Note that `ZG_LITELLM_KEY="sk-anything"` in Step 6 is **not** a placeholder waiting to be filled in — the local proxy performs no authentication, so any string works. Leave it alone; the real key lives only in the proxy terminal.
 3. **Only use configs from this skill.** Two items are load-bearing and non-obvious: `use_chat_completions_api: true` on every model entry (without it requests hit a nonexistent upstream endpoint) and the `zg_patch.py` callback (without it every response stream breaks before completion and Codex reconnects forever).
 4. **Config edits take effect on the next `codex` launch.** Finish by handing the user the run + verification commands — do not claim the current session is already on 0G.
 
 ## Workflow
+
+**Before asking anything, say this to the user:**
+
+> Codex only discovers configuration under `~/.codex` — it has no per-project config, so unlike the Claude Code setup this cannot be confined to one folder. What I will not do is edit anything already there: your `~/.codex/config.toml` is read, never written. Everything I add is one new file, `~/.codex/zg-<model>.config.toml`, plus a bridge directory at `~/.0g-litellm/`. Deleting them undoes all of it, and the setup only applies when you launch with `--profile zg-<model>`.
+
+That last clause matters: nothing changes for their existing Codex sessions unless they pass the profile flag.
 
 ### Step 1 — Pick the model
 

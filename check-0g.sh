@@ -1,6 +1,6 @@
 #!/bin/sh
 # check-0g.sh — sanity-check a 0G PC config for Claude Code.
-# Run from the project that holds .claude/settings.local.json. Silent when healthy.
+# Run from the project that holds .claude/settings.json. Silent when healthy.
 exec python3 - "$@" <<'PY'
 import json, os, pathlib, sys, urllib.request
 
@@ -13,10 +13,18 @@ def load(p):
     except Exception:
         return {}
 
-local = load(".claude/settings.local.json")
-if not local:
-    sys.exit("no .claude/settings.local.json here — run this from the project you configured")
-env = local.get("env", {})
+cfg = load(".claude/settings.json")
+if not cfg:
+    sys.exit("no .claude/settings.json here — run this from the project you configured")
+env = cfg.get("env", {})
+
+# .claude/settings.local.json is loaded after project settings and wins. A config that
+# "does not apply" is usually this, and nothing else reports it.
+shadow = load(".claude/settings.local.json")
+overlap = [k for k in ("env", "modelOverrides", "permissions") if k in shadow]
+if overlap:
+    problems.append(f'.claude/settings.local.json also sets {", ".join(overlap)} and takes precedence\n'
+                    '  over the project settings checked here — Claude Code loads local after project.')
 
 # 1 — a [1m] session model poisons the classifier derived from the Sonnet tier
 for label, path in (("project local", ".claude/settings.local.json"),
@@ -33,7 +41,7 @@ for label, path in (("project local", ".claude/settings.local.json"),
         break
 
 # 2 — the permission gate
-gate = (local.get("modelOverrides") or {}).get("claude-sonnet-5")
+gate = (cfg.get("modelOverrides") or {}).get("claude-sonnet-5")
 if not gate:
     problems.append('modelOverrides["claude-sonnet-5"] is unset — the auto-mode gate resolves through the\n'
                     '  Sonnet tier, so leaving it out sends the safety call to whatever Claude Code picks.')

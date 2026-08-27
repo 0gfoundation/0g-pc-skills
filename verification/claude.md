@@ -39,20 +39,21 @@ echo "${#ANTHROPIC_AUTH_TOKEN} chars"   # 只看长度
 
 ```bash
 cd ~/Desktop/0g-probe
-mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.local.json -o .claude/settings.local.json
+mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
 ```
 
 ## 2. 写入后检查
 
 ```bash
 # a) 与仓库副本逐字节一致
-cmp .claude/settings.local.json "$REPO/configs/claude/settings.local.json" ; echo "a) 期望 0，实得 $?"
+cmp .claude/settings.json "$REPO/configs/claude/settings.json" ; echo "a) 期望 0，实得 $?"
 
 # b) 配置中无凭据 —— 这是本次架构调整的核心
-grep -c 'sk-\|AUTH_TOKEN' .claude/settings.local.json ; echo "b) 期望 0"
+grep -c 'sk-\|AUTH_TOKEN' .claude/settings.json ; echo "b) 期望 0"
 
 # c) 因此它可以安全提交
-git add -A --dry-run | grep settings.local.json ; echo "c) 出现在暂存列表即符合预期（配置本就该共享）"
+git check-ignore -q .claude/settings.json ; echo "c1) 期望 1（不被忽略），实得 $?"
+git add -A --dry-run | grep settings.json ; echo "c2) 出现在暂存列表即符合预期（project 配置本就该共享）"
 
 # d) 全局配置：只比对 Skill 可能写的三个键，不比整文件哈希
 python3 -c "

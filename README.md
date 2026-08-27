@@ -144,9 +144,15 @@ These eight models speak the Anthropic API and can be swapped in by editing alon
 | `claude-sonnet-5` | 1000000 | `983616` |
 | `deepseek-v4-flash` | 1000000 | `983616` |
 | `0gm-1.0-35b-a3b` | 262144 | **`245760`** |
-| `glm-5` | 202752 | **`196608`** |
+| `glm-5` | 202752 | **`190080`** |
 
-> The last two are the trap. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` ships as `983616`, which is far above what those models accept — leave it and the session fails on context length only once it grows long, by which point the model switch is the last thing you'd suspect. Lower it in the same edit.
+Or run [`check-0g.sh`](check-0g.sh) after any change — it reads the effective model, the gate and the ceiling, and says nothing when everything is fine:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh | sh
+```
+
+> The last two rows are the trap. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` ships as `983616`, which is far above what those models accept — leave it and the session fails on context length only once it grows long, by which point the model switch is the last thing you'd suspect. Lower it in the same edit.
 
 Everything else on the router — `glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `deepseek-v4-pro` — is OpenAI-only and cannot reach Claude Code directly. Those need the LiteLLM bridge, so say "switch to glm-5.3" and run the skill again instead of editing.
 

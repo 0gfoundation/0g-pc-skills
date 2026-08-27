@@ -5,243 +5,82 @@ description: Configure Codex CLI to use 0G Private Computer (pc.0g.ai, router-ap
 
 # 0G PC Setup for Codex
 
-Configure Codex CLI to run on 0G Private Computer's inference API. Every config in this skill was verified end-to-end on 2026-08-26 (Codex CLI 0.145.0, LiteLLM 1.98.0). Follow it exactly — do not improvise config values.
+Point Codex at 0G Private Computer through a local LiteLLM bridge. All three config files live in this repo — install them, start the proxy, hand off.
 
-Why a bridge is mandatory (state this once to the user, then move on): Codex ≥ 0.145 removed `wire_api = "chat"` and speaks only the OpenAI Responses API; `router-api.0g.ai/v1/responses` returns 404. A local LiteLLM proxy bridges Responses → chat completions. There is no direct-connection option.
+Codex ≥ 0.145 speaks only the OpenAI Responses API, and `router-api.0g.ai/v1/responses` returns 404, so the bridge is mandatory. There is no direct-connection option.
 
-## Hard rules (read first)
+## Hard rules
 
-1. **Never modify `~/.codex/config.toml`.** That file carries the user's other providers, approval policy, and MCP servers; appending to it makes rollback a manual un-append. Everything this skill needs — the profile *and* the `[model_providers.zg]` block — fits in a standalone `~/.codex/<name>.config.toml`, verified to load with no base `config.toml` present at all. Rollback is deleting one file. Read the base file freely; never modify it. **Be straight with the user about what this does and does not promise** (see the note below Workflow): Codex has no project-level config discovery — profiles are only found in `$CODEX_HOME` — so unlike the Claude Code skill, this one cannot keep its output inside the project. What it can promise is that nothing they already configured is edited, and that removing one added file undoes everything. Do not dress that up as project scoping.
-2. **Never echo, log, or repeat the user's API key.** It goes only into the `ZG_API_KEY` environment variable of the proxy terminal. Never write it into any file inside a git repository. Note that `ZG_LITELLM_KEY="sk-anything"` in Step 6 is **not** a placeholder waiting to be filled in — the local proxy performs no authentication, so any string works. Leave it alone; the real key lives only in the proxy terminal.
-3. **Only use configs from this skill.** Two items are load-bearing and non-obvious: `use_chat_completions_api: true` on every model entry (without it requests hit a nonexistent upstream endpoint) and the `zg_patch.py` callback (without it every response stream breaks before completion and Codex reconnects forever).
-4. **Config edits take effect on the next `codex` launch.** Finish by handing the user the run + verification commands — do not claim the current session is already on 0G.
+1. **Never modify `~/.codex/config.toml`.** It holds the user's other providers, approval policy and MCP servers. Everything here goes into a standalone profile file plus a bridge directory; deleting those undoes it all. Be straight that this is a weaker promise than the Claude Code skill's: Codex has no per-project config, so nothing can be confined to a folder.
+2. **The key never enters the conversation or a config file.** It reaches the proxy only as `ZG_API_KEY` in that terminal's environment. `ZG_LITELLM_KEY="sk-anything"` is **not** a placeholder awaiting a real value — the local proxy performs no authentication, so any string works. Leave it.
+3. **Two settings are load-bearing and non-obvious**: `use_chat_completions_api: true` on every model entry (without it requests hit a nonexistent upstream endpoint), and the `zg_patch.py` callback (without it every response stream breaks before completion and Codex reconnects forever). Install the shipped files rather than retyping them.
+4. **Nothing changes for existing sessions.** The config applies only when launched with `--profile`. Config edits take effect on the next launch; hand the user the run and verify commands rather than claiming the current session is on 0G.
 
-## Workflow
+## Steps
 
-**Before asking anything, say this to the user:**
-
-> Codex only discovers configuration under `~/.codex` — it has no per-project config, so unlike the Claude Code setup this cannot be confined to one folder. What I will not do is edit anything already there: your `~/.codex/config.toml` is read, never written. Everything I add is one new file, `~/.codex/zg-<model>.config.toml`, plus a bridge directory at `~/.0g-litellm/`. Deleting them undoes all of it, and the setup only applies when you launch with `--profile zg-<model>`.
-
-That last clause matters: nothing changes for their existing Codex sessions unless they pass the profile flag.
-
-### Step 1 — Pick the model
-
-Ask which model the user wants (default: `glm-5.3`). Check it exists on the live list.
-
-Tool: **Bash**
+### 1 — Pick the model
 
 ```bash
-curl -s https://router-api.0g.ai/v1/models | jq -r \
-  '.data[] | [.id, (.supported_formats|join("+")), (.context_length|tostring)] | @tsv'
+curl -s https://router-api.0g.ai/v1/models | python3 -c "import json,sys; [print(m['id'], m.get('context_length')) for m in json.load(sys.stdin)['data']]"
 ```
 
-If `jq` is not installed, use this instead (macOS ships python3):
+Default `glm-5.3`. Any chat model works through the bridge. If the endpoint is unreachable, stop and report.
+
+### 2 — Confirm the key is exported
 
 ```bash
-curl -s https://router-api.0g.ai/v1/models | python3 -c "import json,sys; [print(m['id'], '+'.join(m.get('supported_formats',[])), m.get('context_length')) for m in json.load(sys.stdin)['data']]"
+[ -n "$ZG_API_KEY" ] && echo "present (${#ZG_API_KEY} chars)" || echo "absent"
 ```
 
-Expected output: a table of model IDs, formats, context length. Any model with `openai` in its formats works through the bridge (that is all of the chat models). If the endpoint is unreachable, stop and report — do not proceed on a stale model list.
+Presence and length only. If absent, ask the user to run ` export ZG_API_KEY='sk-…'` in the terminal that will run the proxy — the leading space keeps it out of shell history.
 
-### Step 2 — Get the API key
-
-Tell the user: create an inference key (starts with `sk-`) at pc.0g.ai → Dashboard → API Keys, and have it ready for the proxy terminal in Step 4. Do not ask them to paste it into any file you will create.
-
-### Step 3 — Write the LiteLLM bridge files
-
-Create a dedicated directory outside any git repository.
-
-Tool: **Bash**
+### 3 — Install the three files
 
 ```bash
 mkdir -p ~/.0g-litellm
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/litellm-config.yaml -o ~/.0g-litellm/litellm-config.yaml
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg_patch.py -o ~/.0g-litellm/zg_patch.py
+mkdir -p "${CODEX_HOME:-$HOME/.codex}" && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg-glm53.config.toml -o "${CODEX_HOME:-$HOME/.codex}/zg-glm53.config.toml"
 ```
 
-Tool: **Write** `~/.0g-litellm/litellm-config.yaml` (add or remove `model_list` entries to match the models the user wants; keep every entry's two critical params):
+The profile must land in `$CODEX_HOME` when that is set — Codex looks nowhere else, and it reports nothing when a profile is missing: it silently falls back to its own default and sends the request to OpenAI.
 
-```yaml
-model_list:
-  - model_name: glm-5.3
-    litellm_params:
-      model: hosted_vllm/glm-5.3           # prefix MUST be hosted_vllm/ (openai/ routes upstream to a nonexistent /v1/responses -> 404)
-      api_base: https://router-api.0g.ai/v1
-      api_key: os.environ/ZG_API_KEY
-      use_chat_completions_api: true        # REQUIRED for the Responses->chat bridge Codex depends on
-      additional_drop_params: ["reasoning_effort"]   # router rejects Codex's reasoning object with HTTP 400
-  - model_name: glm-5.2
-    litellm_params:
-      model: hosted_vllm/glm-5.2
-      api_base: https://router-api.0g.ai/v1
-      api_key: os.environ/ZG_API_KEY
-      use_chat_completions_api: true
-      additional_drop_params: ["reasoning_effort"]
-  - model_name: kimi-k3
-    litellm_params:
-      model: hosted_vllm/kimi-k3
-      api_base: https://router-api.0g.ai/v1
-      api_key: os.environ/ZG_API_KEY
-      use_chat_completions_api: true
-      additional_drop_params: ["reasoning_effort"]
-  - model_name: qwen3.8-max
-    litellm_params:
-      model: hosted_vllm/qwen3.8-max
-      api_base: https://router-api.0g.ai/v1
-      api_key: os.environ/ZG_API_KEY
-      use_chat_completions_api: true
-      additional_drop_params: ["reasoning_effort"]
+For another model, copy the profile to `zg-<name>.config.toml` and change its `model =` line; the model must appear in the bridge's `model_list`.
 
-litellm_settings:
-  num_retries: 2
-  callbacks: zg_patch.zg_patch_instance
-```
+### 4 — Start the bridge
 
-Tool: **Write** `~/.0g-litellm/zg_patch.py`:
-
-```python
-"""Workaround: 0G Router ends every stream with a billing chunk whose "choices" is [],
-and LiteLLM's Responses-API bridge crashes on it (choices[0] IndexError).
-Loaded via litellm_settings.callbacks; remove once fixed upstream in LiteLLM."""
-from litellm.integrations.custom_logger import CustomLogger
-from litellm.responses.litellm_completion_transformation import streaming_iterator as _si
-
-_orig = _si.LiteLLMCompletionStreamingIterator._get_delta_string_from_streaming_choices
-
-def _safe(self, choices):
-    if not choices:
-        return ""
-    return _orig(self, choices)
-
-_si.LiteLLMCompletionStreamingIterator._get_delta_string_from_streaming_choices = _safe
-
-class _Noop(CustomLogger):
-    pass
-
-zg_patch_instance = _Noop()
-```
-
-### Step 4 — Start the bridge
-
-Tell the user to run this in a separate terminal (it must keep running; first launch takes 1–2 min to install dependencies):
+Its **own terminal**, kept running; first launch takes a minute or two to install dependencies:
 
 ```bash
-cd ~/.0g-litellm
-export ZG_API_KEY="sk-...your key..."
-uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
+cd ~/.0g-litellm && uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
 ```
 
-(If `uvx` is unavailable: `pip install 'litellm[proxy]==1.98.0'` then `litellm --config litellm-config.yaml --port 4000` from the same directory. Pin 1.98.0 — it is the tested version; 1.99.0rc1 carries the same stream bug and the patch covers both.)
-
-Health check once it prints its startup banner — Tool: **Bash**
+(`pip install 'litellm[proxy]==1.98.0'` works too. Pin 1.98.0.) Check port 4000 is free first with `lsof -i :4000` — something else listening there produces a confusing 503. Then, from another terminal:
 
 ```bash
-curl -s -m 5 http://127.0.0.1:4000/health/liveliness && echo && \
-curl -s http://127.0.0.1:4000/v1/models -H "Authorization: Bearer sk-anything" | jq -r '.data[].id'
+curl -s -m 5 http://127.0.0.1:4000/health/liveliness && echo
 ```
 
-(Without `jq`, replace the second line's pipe with `python3 -c "import json,sys; [print(m['id']) for m in json.load(sys.stdin)['data']]"`.)
+### 5 — Confirm Codex loads the profile
 
-Expected output: a liveliness response, then the model names from `model_list`.
-
-### Step 5 — Configure Codex
-
-Everything goes in one standalone profile file. `~/.codex/config.toml` is never touched — a profile file carries its own `[model_providers.*]` block, and Codex loads it even when no base `config.toml` exists.
-
-Profiles in Codex ≥ 0.145 are **standalone files**; an inline `[profiles.x]` table in config.toml makes Codex refuse to start.
-
-Tool: **Bash**. Write it with this script — it validates the TOML in memory before anything reaches disk, and backs up a previous file of the same name:
-
-```bash
-python3 - <<'PY'
-import os, pathlib, shutil, sys
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
-
-MODEL = "glm-5.3"          # must exist in the LiteLLM model_list
-NAME  = "zg-glm53"         # the --profile name
-
-body = """model = "%s"
-model_provider = "zg"
-
-[model_providers.zg]
-name = "0G Private Computer via LiteLLM"
-base_url = "http://127.0.0.1:4000/v1"
-env_key = "ZG_LITELLM_KEY"
-wire_api = "responses"
-""" % MODEL
-
-if tomllib is not None:
-    try:
-        parsed = tomllib.loads(body)
-    except tomllib.TOMLDecodeError as e:
-        sys.exit("refusing to write: generated TOML does not parse (%s)" % e)
-    if parsed["model_providers"]["zg"]["wire_api"] != "responses":
-        sys.exit('refusing to write: wire_api must be "responses" on Codex >= 0.145')
-else:
-    print("note: python < 3.11, no tomllib — relying on the config-load check below")
-
-# Codex reads $CODEX_HOME when it is set — writing to ~/.codex regardless would put the
-# profile where Codex never looks, and Codex does not report a missing profile: it falls
-# back to its default provider and sends the request to OpenAI without a word.
-home = pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
-home.mkdir(parents=True, exist_ok=True)
-target = home / (NAME + ".config.toml")
-if target.is_file():
-    shutil.copy2(target, str(target) + ".bak")
-    print("backed up previous profile to", str(target) + ".bak")
-target.write_text(body)
-print("wrote", target)
-PY
-```
-
-For each additional model, run it again with `MODEL` and `NAME` changed (the model must exist in the LiteLLM `model_list`).
-
-Then confirm Codex can actually load it — **before** handing off. Unsetting the key makes the check stop right after config resolution, so it needs neither the proxy nor the network:
+Needs neither the proxy nor the network — dropping the key stops Codex right after config resolution:
 
 ```bash
 env -u ZG_LITELLM_KEY codex exec --profile zg-glm53 --skip-git-repo-check hi < /dev/null 2>&1 | tail -3
 ```
 
-The `< /dev/null` is required — `codex exec` blocks waiting on stdin when it is a pipe. Expected: ``Missing environment variable: `ZG_LITELLM_KEY` `` — that message means the config parsed *and* the `zg` provider resolved. Anything starting `Error loading config.toml:` means the profile is broken; fix it before continuing. (`codex doctor` will not catch this — it does not read profile files.)
+Expected: ``Missing environment variable: `ZG_LITELLM_KEY` `` — the TOML parsed and the `zg` provider resolved. `Error loading config.toml:` means the profile is broken. The `< /dev/null` is required; `codex exec` blocks on stdin when stdin is a pipe. `codex doctor` will not catch this — it never reads profile files.
 
-### Step 6 — Hand off: run + verify
-
-Give the user these commands:
+### 6 — Hand off
 
 ```bash
-export ZG_LITELLM_KEY="sk-anything"   # placeholder; the local proxy does not check it
+ export ZG_LITELLM_KEY='sk-anything'
 codex --profile zg-glm53
-# or non-interactive:
-codex exec --profile zg-glm53 "create hello.txt containing: hello from 0g, then cat it"
 ```
 
-**Tell the user to check the `model:` line in the startup banner every time**, and why:
+**Tell the user to read the `model:` line in the startup banner every time.** `glm-5.3` means the profile loaded. `gpt-*` means it did not, and the request is going to `api.openai.com` — a user logged in to Codex gets a normal-looking answer and never learns their code left the TEE path. That line is the only warning Codex gives.
 
-| `model:` shows | Meaning |
-|---|---|
-| `glm-5.3` (the model configured) | The profile loaded; requests go through the 0G bridge. |
-| `gpt-*` (e.g. `gpt-5.6-sol`) | **Stop.** The profile was not loaded and requests are going to `api.openai.com`. Codex does not report a missing profile — no error, no warning, the word "profile" does not appear in the output — it silently uses its own default. A user who is logged in to Codex gets a perfectly normal-looking answer from OpenAI. |
-
-This is worth more than any config-file check: it observes where the request actually went, not where a file was written. For a skill whose point is TEE-backed private inference, silently reaching OpenAI is a confidentiality failure that presents as success.
-
-Expected otherwise: Codex plans, runs the shell command, and reports the file content. The startup warning `Model metadata for glm-5.3 not found... fallback metadata` is harmless.
-
-If something fails, probe layer by layer (Tool: **Bash**) and match the first layer that breaks:
-
-```bash
-# Layer 1 — router reachable with the key (expect: HTTP 200)
-curl -s https://router-api.0g.ai/v1/chat/completions -H "Authorization: Bearer $ZG_API_KEY" \
-  -H "content-type: application/json" \
-  -d '{"model":"glm-5.3","messages":[{"role":"user","content":"ping"}],"max_tokens":600}' \
-  -w '\nHTTP %{http_code}\n' | tail -1
-
-# Layer 2 — the bridge's Responses endpoint, the one Codex actually uses
-# (expect: output "1", meaning the stream ends with response.completed)
-curl -s -N http://127.0.0.1:4000/v1/responses -H "Authorization: Bearer sk-anything" \
-  -H "content-type: application/json" \
-  -d '{"model":"glm-5.3","input":"ping","stream":true}' | grep -c "response.completed"
-```
+**Rollback:** `rm "${CODEX_HOME:-$HOME/.codex}"/zg-*.config.toml && rm -rf ~/.0g-litellm`.
 
 ## Troubleshooting map
 

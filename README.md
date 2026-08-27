@@ -82,7 +82,36 @@ Every tier points at a 0G model, so whichever one Claude Code reaches for, the r
 >
 > Your `/model` choice is remembered in `~/.claude/settings.json`, so this survives restarts and follows you into other projects. The skill will then refuse to write a new config until you clear it — that refusal is the guard working, not a bug. Fix it with `/model` and a plain (non-1M) entry.
 
-**Switching the main model** — say "switch to glm-5.3" and run the skill again. It is not a one-line edit: `glm-5.2` speaks the Anthropic API directly, while `glm-5.3`, `kimi-k3` and `qwen3.8-max` are OpenAI-only and need a local LiteLLM bridge the skill sets up for you. Restart afterwards.
+**Switching the main model** — edit `.claude/settings.local.json` and restart. Three fields move together:
+
+```json
+"ANTHROPIC_MODEL": "deepseek-v4-flash",
+"ANTHROPIC_DEFAULT_FABLE_MODEL": "deepseek-v4-flash",
+"ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-v4-flash",
+```
+
+Leave `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `modelOverrides.claude-sonnet-5` alone. The second one is the permission gate: point it at a reasoning model and every Bash, git and network call starts timing out under auto mode.
+
+These eight models speak the Anthropic API and can be swapped in by editing alone:
+
+| Model | Context | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` |
+|---|---|---|
+| `glm-5.2` | 1048576 | `983616` (unchanged) |
+| `claude-fable-5` | 1000000 | `983616` |
+| `claude-opus-5` | 1000000 | `983616` |
+| `claude-opus-4-8` | 1000000 | `983616` |
+| `claude-sonnet-5` | 1000000 | `983616` |
+| `deepseek-v4-flash` | 1000000 | `983616` |
+| `0gm-1.0-35b-a3b` | 262144 | **`245760`** |
+| `glm-5` | 202752 | **`196608`** |
+
+> The last two are the trap. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` ships as `983616`, which is far above what those models accept — leave it and the session fails on context length only once it grows long, by which point the model switch is the last thing you'd suspect. Lower it in the same edit.
+
+Everything else on the router — `glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `deepseek-v4-pro` — is OpenAI-only and cannot reach Claude Code directly. Those need the LiteLLM bridge, so say "switch to glm-5.3" and run the skill again instead of editing.
+
+Check the current list yourself with `curl -s https://router-api.0g.ai/v1/models`; anything whose `supported_formats` contains `anthropic` belongs in the table above.
+
+And whichever model you pick, don't append `[1m]` to its name — same failure as the `/model` warning above.
 
 **Going back to Anthropic** — `rm .claude/settings.local.json` and restart. Nothing else to undo.
 

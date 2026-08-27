@@ -58,14 +58,21 @@ The leading space keeps them out of your shell history. They last as long as the
 
 Three steps. The third one is where it goes wrong.
 
+**① Your key**, in the terminal you are about to work in — skip if you exported it above.
+
 ```bash
-# ① your key, in the terminal you are about to work in — skip if you exported it above
  export ANTHROPIC_AUTH_TOKEN='sk-…'
+```
 
-# ② the config, from inside the project you want on 0G
+**② The config**, from inside the project you want on 0G.
+
+```bash
 mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
+```
 
-# ③ restart Claude Code — in that same terminal
+**③ Restart Claude Code** — in that same terminal.
+
+```bash
 claude
 ```
 
@@ -148,7 +155,7 @@ mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \
   -o ~/.codex/skills/0g-pc-model-config-codex/SKILL.md
 ```
 
-Then say **“set up 0G PC” / “接入 0G PC”** (Claude Code) or **“set up 0G PC in Codex” / “在 Codex 接入 0G PC”**.
+Then say **"set up 0G PC"** (Claude Code) or **"set up 0G PC in Codex"** (Codex).
 
 **Update:** re-run the curl. **Uninstall:** `rm -rf` the skill directory.
 

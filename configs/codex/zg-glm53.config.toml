@@ -1,0 +1,8 @@
+model = "glm-5.3"
+model_provider = "zg"
+
+[model_providers.zg]
+name = "0G Private Computer via LiteLLM"
+base_url = "http://127.0.0.1:4000/v1"
+env_key = "ZG_LITELLM_KEY"
+wire_api = "responses"

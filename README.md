@@ -79,7 +79,7 @@ flowchart TD
     M -->|"stream disconnects, reconnect loop"| Z["zg_patch.py not loaded —<br/>start the proxy from ~/.0g-litellm"]
 ```
 
-Codex cannot reach the 0G router directly — it speaks only the Responses API, which the router does not serve — so a local LiteLLM proxy translates. Three files, then a proxy.
+Codex cannot reach the 0G router directly — it speaks only the Responses API, which the router does not serve — so a local LiteLLM proxy translates. It listens on `http://127.0.0.1:4000`, which is the address the profile points at; if that port is already taken, change it in both places. Three files, then the proxy.
 
 ```bash
 mkdir -p ~/.0g-litellm && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/litellm-config.yaml -o ~/.0g-litellm/litellm-config.yaml

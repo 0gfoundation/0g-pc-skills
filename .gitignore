@@ -5,3 +5,7 @@ spec/
 .DS_Store
 *.skill
 .claude/
+
+# local probe runs — real-machine verification records, never pushed
+0g-probe-claude/
+0g-probe-codex/

@@ -36,17 +36,34 @@ The leading space keeps them out of your shell history. They last as long as the
 
 ![Claude Code setup: export ANTHROPIC_AUTH_TOKEN in the terminal you will restart in, curl one settings.json into the project, pick a model, then verify with /status and any Bash call](Assets/0g-pc-claude-code-setup.png)
 
-With the variables exported above, from the project you want on 0G:
+Three steps. The third one is where it goes wrong.
 
 ```bash
+# ① your key, in the terminal you are about to work in — skip if you exported it above
+ export ANTHROPIC_AUTH_TOKEN='sk-…'
+
+# ② the config, from inside the project you want on 0G
 mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
+
+# ③ restart Claude Code — in that same terminal
+claude
 ```
 
-Restart Claude Code — config is read at launch — then check `/status`: the Base URL should read `https://router-api.0g.ai`.
+Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. The config arrives working, on `glm-5.2`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
 
-That is the whole setup. The file arrives on `glm-5.2`; to use a different model edit one line before restarting (see [Switching the main model](#after-its-configured) below for which models work and which need the bridge).
+**Step ③ is the one people miss.** Your key lives only in the shell you exported it in, so launching Claude Code from a different terminal returns a 401 that reads like a bad key. That is the cost of keeping credentials out of every file: every new terminal needs the export again.
 
-**Uninstall:** `rm .claude/settings.json` and restart.
+### Then what
+
+| You want | Do this |
+|---|---|
+| a different tier, without restarting | `/model` — Opus and Fable are `glm-5.2`, Sonnet and Haiku `0gm-1.0-35b-a3b`. **Never pick a "(1M context)" entry:** [it breaks every Bash, git and network call](#dont-pick-a-1m-context-entry). |
+| a different main model | Edit three fields and restart — [which models qualify, and the context ceiling that travels with them](#switching-the-main-model). |
+| `glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `deepseek-v4-pro` | These speak OpenAI only and cannot reach Claude Code directly — [they need the LiteLLM bridge](#openai-only-models-need-the-bridge). |
+| to confirm you are really on 0G | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh \| sh` — it reads the effective model, the permission gate and the context ceiling, and says nothing when all three are right. |
+| out | `rm .claude/settings.json` and restart. Nothing else to undo. |
+
+If you plan to edit the file, [what it contains](#what-the-config-file-contains) is worth two minutes first.
 
 ## Set up — Codex
 
@@ -73,7 +90,9 @@ Then, in any terminal:
 codex --profile zg-glm53
 ```
 
-`--profile` is required every time; without it you get your ordinary Codex, which is also how you switch back.
+`--profile` is required every time; without it you get your ordinary Codex, which is also how you switch back. To use a different model, run the skill again for it — it writes another profile file, both stay, and you pick between them with `--profile`.
+
+Every launch, read the `model:` line in the startup banner: your configured model means the profile loaded, `gpt-*` means it was not found and the request went to `api.openai.com` instead ([why that is silent](#codex)).
 
 **Uninstall:** `rm "${CODEX_HOME:-$HOME/.codex}"/zg-glm53.config.toml && rm -rf ~/.0g-litellm`.
 
@@ -99,9 +118,11 @@ Then say **“set up 0G PC” / “接入 0G PC”** (Claude Code) or **“set u
 
 ### Claude Code
 
-**Restart first.** Config is read at launch, so nothing changes in a session that was already open. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`. The startup line `[claude-code:unrecognized_model]` is expected and harmless: Claude Code simply doesn't know 0G's model names.
+Config is read at launch, so nothing changes in a session that was already open. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`.
 
-**What the file contains** — `.claude/settings.json` in the project:
+#### What the config file contains
+
+`.claude/settings.json`, in the project:
 
 ```json
 {
@@ -123,13 +144,9 @@ Every tier points at a 0G model, so whichever one Claude Code reaches for, the r
 
 This is the project settings file, meant to be committed. If you also keep a personal `.claude/settings.local.json`, that one wins — Claude Code loads `local` after `project` — so a setting that seems not to apply is worth checking there first.
 
-**Switching models in a session.** `/model` moves between the tiers above — Opus and Fable land on `glm-5.2`, Sonnet and Haiku on `0gm-1.0-35b-a3b`. No restart needed.
+#### Switching the main model
 
-> ⚠️ **Do not pick a "(1M context)" variant.** Claude Code derives the auto-mode safety classifier from the Sonnet tier and copies your main model's `[1m]` tag onto the result, asking the router for `0gm-1.0-35b-a3b[1m]` — an ID it does not serve. The classifier becomes unreachable and auto mode fails closed on every Bash, git and network call, while chat keeps working, so it reads like the model is fine and the tools are broken.
->
-> Your `/model` choice is remembered in `~/.claude/settings.json`, so this survives restarts and follows you into other projects. The skill will then refuse to write a new config until you clear it — that refusal is the guard working, not a bug. Fix it with `/model` and a plain (non-1M) entry.
-
-**Switching the main model** — edit `.claude/settings.json` and restart. Three fields move together:
+Edit `.claude/settings.json` and restart. Three fields move together:
 
 ```json
 "ANTHROPIC_MODEL": "deepseek-v4-flash",
@@ -152,32 +169,48 @@ These eight models speak the Anthropic API and can be swapped in by editing alon
 | `0gm-1.0-35b-a3b` | 262144 | **`245760`** |
 | `glm-5` | 202752 | **`190080`** |
 
+> The last two rows are the trap. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` ships as `983616`, which is far above what those models accept — leave it and the session fails on context length only once it grows long, by which point the model switch is the last thing you'd suspect. Lower it in the same edit.
+
 Or run [`check-0g.sh`](check-0g.sh) after any change — it reads the effective model, the gate and the ceiling, and says nothing when everything is fine:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh | sh
 ```
 
-> The last two rows are the trap. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` ships as `983616`, which is far above what those models accept — leave it and the session fails on context length only once it grows long, by which point the model switch is the last thing you'd suspect. Lower it in the same edit.
+Check the current list yourself with `curl -s https://router-api.0g.ai/v1/models`; anything whose `supported_formats` contains `anthropic` belongs in the table above. And whichever model you pick, don't append `[1m]` to its name — same failure as below.
 
-Everything else on the router — `glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `deepseek-v4-pro` — is OpenAI-only and cannot reach Claude Code directly. Those need the LiteLLM bridge, so say "switch to glm-5.3" and run the skill again instead of editing.
+#### Don't pick a "(1M context)" entry
 
-Check the current list yourself with `curl -s https://router-api.0g.ai/v1/models`; anything whose `supported_formats` contains `anthropic` belongs in the table above.
+`/model` moves between the tiers above with no restart. What it must not move to is a "(1M context)" variant. Claude Code derives the auto-mode safety classifier from the Sonnet tier and copies your main model's `[1m]` tag onto the result, asking the router for `0gm-1.0-35b-a3b[1m]` — an ID it does not serve. The classifier becomes unreachable and auto mode fails closed on every Bash, git and network call, while chat keeps working, so it reads like the model is fine and the tools are broken.
 
-And whichever model you pick, don't append `[1m]` to its name — same failure as the `/model` warning above.
+Your `/model` choice is remembered in `~/.claude/settings.json`, so this survives restarts and follows you into other projects. The skill will then refuse to write a new config until you clear it — that refusal is the guard working, not a bug. Fix it with `/model` and a plain (non-1M) entry.
 
-**Going back to Anthropic** — `rm .claude/settings.json` and restart. Nothing else to undo.
+#### OpenAI-only models need the bridge
+
+`glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*` and `deepseek-v4-pro` cannot reach Claude Code directly. They need the same local LiteLLM proxy the Codex setup uses — install the two bridge files and start it in its own terminal:
+
+```bash
+mkdir -p ~/.0g-litellm
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/litellm-config.yaml -o ~/.0g-litellm/litellm-config.yaml
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg_patch.py -o ~/.0g-litellm/zg_patch.py
+cd ~/.0g-litellm && export ZG_API_KEY="$ANTHROPIC_AUTH_TOKEN"
+uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
+```
+
+Then two changes in `.claude/settings.json`: `ANTHROPIC_BASE_URL` to `http://127.0.0.1:4000`, and the three model fields to the model you want. The proxy does not authenticate, so in this mode `ANTHROPIC_AUTH_TOKEN` can be any string — the real key is the one `ZG_API_KEY` carries into the proxy. Or say "switch to glm-5.3" to the skill and let it do all of it.
+
+#### Going back to Anthropic
+
+`rm .claude/settings.json` and restart. Nothing else to undo.
 
 ### Codex
 
-**No restart, but every launch needs the flag.** The config only applies with `--profile`:
+**Every launch needs the flag**, `codex exec` included. No restart, though — there is no session to restart.
 
 ```bash
 codex --profile zg-glm53
 codex exec --profile zg-glm53 "…"
 ```
-
-Without it you get your ordinary Codex. That is also how you switch back — just drop the flag.
 
 **Keep the bridge running.** Codex speaks only the Responses API, which the 0G router does not serve, so a local LiteLLM proxy translates. It lives in its own terminal and must stay up for the whole session:
 
@@ -193,7 +226,7 @@ uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 
 | your configured model, e.g. `glm-5.3` | The profile loaded; requests go through the bridge. |
 | `gpt-*` | **Stop.** The profile was not found and Codex fell back to its own default — your request is going to `api.openai.com`. Codex reports nothing when a profile is missing, so this line is the only warning you get. |
 
-**Switching models** — run the skill again for the model you want. It writes another `~/.codex/zg-<name>.config.toml`; both stay, and you pick with `--profile`.
+**Switching models** — each run of the skill writes another `~/.codex/zg-<name>.config.toml`. They all stay; `--profile` picks between them.
 
 ## Verifying a change
 
@@ -204,7 +237,7 @@ If you are changing this repo rather than using it, [`verification/`](verificati
 - A 0G PC inference API key (`sk-…`) from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. Export it as shown above; do not put it in a file inside a repository, where one `git add -A` can commit it.
 - For Codex: [uv](https://docs.astral.sh/uv/) or `pip`, for the LiteLLM bridge.
 
-Live model list — worth checking before picking a model, since the table below ages:
+Live model list — worth checking before picking a model, since the tables above age:
 
 ```bash
 curl -s https://router-api.0g.ai/v1/models

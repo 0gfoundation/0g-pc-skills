@@ -4,8 +4,6 @@ Ready-made configuration that points **Claude Code** and **Codex** at [0G Privat
 
 Setup is: export your key, download a config file, restart. The config files live in [`configs/`](configs/) — they are ordinary files you can read, diff, and edit. Two Agent Skills ([`skills/`](skills/)) can walk you through the same steps in a session if you prefer that to reading this page.
 
-Verified end-to-end on 2026-08-27 with Claude Code 2.1.246, Codex CLI 0.145.0 / 0.149.1, and LiteLLM 1.98.0.
-
 - **Before you start** — [what you need](#what-you-need) · [where your key lives](#your-key-never-goes-in-a-file) · [what gets written](#what-is-and-isnt-touched)
 - **Set it up** — [Claude Code](#set-up--claude-code) · [Codex](#set-up--codex) · [or let a skill do it](#using-the-skills-instead)
 - **Already set up** — [Claude Code reference](docs/claude-code.md) for switching models, the 1M-context trap and the bridge; [Codex reference](docs/codex.md) for the `--profile` flag and reading the banner

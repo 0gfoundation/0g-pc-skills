@@ -34,22 +34,7 @@ The leading space keeps them out of your shell history. They last as long as the
 
 ## Set up — Claude Code
 
-```mermaid
-flowchart TD
-    K["export ANTHROPIC_AUTH_TOKEN<br/>this terminal only"]
-    K --> D["curl configs/claude/settings.json<br/>into .claude/settings.json"]
-    S["skill: say 'set up 0G PC'"] -.->|"walks you through<br/>the same steps"| D
-    D --> M{"which model?"}
-    M -->|"glm-5.2 — shipped default"| R["restart claude<br/>same terminal, key lives there"]
-    M -->|"another anthropic-format model"| E["edit 3 model fields<br/>+ lower MAX_CONTEXT_TOKENS<br/>if its window is smaller"]
-    M -->|"openai-only: glm-5.3, kimi-k3, qwen…"| B["start LiteLLM bridge<br/>+ point BASE_URL at 127.0.0.1:4000"]
-    E --> R
-    B --> R
-    R --> V["/status → Base URL is router-api.0g.ai"]
-    V --> T{"does a Bash call work?"}
-    T -->|"yes"| OK["done — commit .claude/settings.json<br/>so the team shares it"]
-    T -->|"no"| C["run check-0g.sh<br/>then the troubleshooting table"]
-```
+![Claude Code setup: export ANTHROPIC_AUTH_TOKEN in the terminal you will restart in, curl one settings.json into the project, pick a model, then verify with /status and any Bash call](Assets/0g-pc-claude-code-setup.png)
 
 With the variables exported above, from the project you want on 0G:
 
@@ -65,19 +50,7 @@ That is the whole setup. The file arrives on `glm-5.2`; to use a different model
 
 ## Set up — Codex
 
-```mermaid
-flowchart TD
-    K["export ZG_API_KEY"]
-    K --> D["curl 3 files:<br/>litellm-config.yaml, zg_patch.py<br/>zg-glm53.config.toml"]
-    S["skill: say 'set up 0G PC in Codex'"] -.->|"walks you through<br/>the same steps"| D
-    D --> P["start the bridge in its own terminal<br/>leave it running"]
-    P --> H["health check: curl 127.0.0.1:4000"]
-    H --> L["codex --profile zg-glm53<br/>required every launch"]
-    L --> M{"banner says model: ?"}
-    M -->|"glm-5.3 — your model"| OK["done"]
-    M -->|"gpt-* — profile not loaded"| X["STOP: the request is going to OpenAI.<br/>Codex reports nothing when a profile is missing"]
-    M -->|"stream disconnects, reconnect loop"| Z["zg_patch.py not loaded —<br/>start the proxy from ~/.0g-litellm"]
-```
+![Codex setup: export ZG_API_KEY, pull three files, run the LiteLLM bridge in its own window, launch with --profile every time, then read the banner — model: glm-5.3 means you are on 0G, model: gpt-* means the request went to OpenAI](Assets/0g-pc-codex-setup.png)
 
 Codex cannot reach the 0G router directly — it speaks only the Responses API, which the router does not serve — so a local LiteLLM proxy translates. It listens on `http://127.0.0.1:4000`, which is the address the profile points at; if that port is already taken, change it in both places. Three files, then the proxy.
 

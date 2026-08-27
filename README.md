@@ -189,6 +189,10 @@ uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 
 
 **Switching models** — run the skill again for the model you want. It writes another `~/.codex/zg-<name>.config.toml`; both stay, and you pick with `--profile`.
 
+## Verifying a change
+
+If you are changing this repo rather than using it, [`verification/`](verification/) holds the two manual protocols — one per client — that check a config end to end on a real machine: what to run, what each step should print, and how to read the failure modes. They exist because the interesting failures here (a poisoned classifier, a silently redirected Codex request) look like something other than what they are.
+
 ## What you need
 
 - A 0G PC inference API key (`sk-…`) from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. Export it as shown above; do not put it in a file inside a repository, where one `git add -A` can commit it.

@@ -53,7 +53,7 @@ Codex cannot reach the 0G router directly — it speaks only the Responses API, 
 ```bash
 mkdir -p ~/.0g-litellm && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/litellm-config.yaml -o ~/.0g-litellm/litellm-config.yaml
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg_patch.py -o ~/.0g-litellm/zg_patch.py
-mkdir -p ~/.codex && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg-glm53.config.toml -o ~/.codex/zg-glm53.config.toml
+mkdir -p "${CODEX_HOME:-$HOME/.codex}" && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg-glm53.config.toml -o "${CODEX_HOME:-$HOME/.codex}/zg-glm53.config.toml"
 ```
 
 Start the proxy in **its own terminal** and leave it running (first launch takes a minute or two to install dependencies):
@@ -71,7 +71,7 @@ codex --profile zg-glm53
 
 `--profile` is required every time; without it you get your ordinary Codex, which is also how you switch back.
 
-**Uninstall:** `rm ~/.codex/zg-glm53.config.toml && rm -rf ~/.0g-litellm`.
+**Uninstall:** `rm "${CODEX_HOME:-$HOME/.codex}"/zg-glm53.config.toml && rm -rf ~/.0g-litellm`.
 
 ## Using the skills instead
 

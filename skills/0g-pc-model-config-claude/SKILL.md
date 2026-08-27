@@ -9,7 +9,7 @@ Point Claude Code at 0G Private Computer's inference API. The config is a file i
 
 ## Hard rules
 
-1. **Never write `~/.claude/settings.json`.** It holds the user's hooks, plugins, status line and `/model` choice. Read it freely; the config you install goes to `<project>/.claude/settings.local.json`, and removing that one file undoes everything.
+1. **Never write `~/.claude/settings.json`.** It holds the user's hooks, plugins, status line and `/model` choice. Read it freely; the config you install goes to `<project>/.claude/settings.json` — the project settings file, which is meant to be committed and shared — and removing that one file undoes everything. If the project also has a `.claude/settings.local.json`, it takes precedence; check there when a setting appears not to apply.
 2. **The key never enters the conversation, and never enters a file.** It lives in the user's shell as `ANTHROPIC_AUTH_TOKEN`. Do not `cat` it, echo it, put it on a command line, or write it anywhere. The config file deliberately has no credential field — that is what makes it safe to commit.
 3. **Do not touch the permission gate.** `modelOverrides["claude-sonnet-5"]` must stay on `0gm-1.0-35b-a3b`. In auto mode the safety classifier resolves through the **Sonnet** tier, not Haiku; put a reasoning model there and every Bash, git and network call times out with "temporarily unavailable" while chat keeps working. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is not the gate but is kept fast for background work.
 4. **Nothing takes effect until the next launch.** Finish by telling the user to restart — never claim the current session is now on 0G.
@@ -49,7 +49,7 @@ If the effective model ends in `[1m]`, **stop**. Claude Code copies that tag ont
 ### 4 — Install the config
 
 ```bash
-mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.local.json -o .claude/settings.local.json
+mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
 ```
 
 It arrives on `glm-5.2`. For another anthropic-format model, change `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` together; if its context is under 983616 (`glm-5` 202752, `0gm-1.0-35b-a3b` 262144) lower `CLAUDE_CODE_MAX_CONTEXT_TOKENS` too, or long sessions fail hours later. The file holds no credential — tell the user it is safe to commit and share.
@@ -60,7 +60,7 @@ It arrives on `glm-5.2`. For another anthropic-format model, change `ANTHROPIC_M
 2. `/status` — Base URL should read `https://router-api.0g.ai`. `[claude-code:unrecognized_model]` is expected and harmless.
 3. Ask the new session to run `echo ok > probe.txt && cat probe.txt`. Under the shipped `acceptEdits` it prompts once and succeeds; if the user switched to `auto`, it should run with no prompt and no "temporarily unavailable".
 
-**Rollback:** `rm .claude/settings.local.json` and restart.
+**Rollback:** `rm .claude/settings.json` and restart.
 
 ## OpenAI-only models (LiteLLM bridge)
 
@@ -80,9 +80,9 @@ The bridge files are shared with the Codex setup, hence their path. The proxy do
 | Symptom | Cause → fix |
 |---|---|
 | Auto mode: "xxx is temporarily unavailable, cannot determine the safety of …" | Read the model name in the message — it names the classifier model, and the fix follows from it. Gate model wrong: point `modelOverrides["claude-sonnet-5"]` at `0gm-1.0-35b-a3b` (hard rule 4 — Sonnet tier, not Haiku). |
-| That message names a model with a `[1m]` suffix (e.g. `0gm-1.0-35b-a3b[1m]`) | The session model carries `[1m]` and Claude Code copied the tag onto the derived classifier model; the router does not serve that ID. Drop the tag: `/model` without the (1M context) variant, or `"model": "glm-5.2"` in `.claude/settings.local.json`. The Step 5A writer refuses to run while this is in place. |
+| That message names a model with a `[1m]` suffix (e.g. `0gm-1.0-35b-a3b[1m]`) | The session model carries `[1m]` and Claude Code copied the tag onto the derived classifier model; the router does not serve that ID. Drop the tag: `/model` without the (1M context) variant, or `"model": "glm-5.2"` in `.claude/settings.json`. The Step 5A writer refuses to run while this is in place. |
 | That message names your main model (e.g. `glm-5.2`) | The Sonnet-tier resolution returned nothing and the classifier fell back to the main model — either `ANTHROPIC_DEFAULT_SONNET_MODEL` is set to an unrecognised ID (remove it), or a fable/mythos main model sent the classifier to the Opus tier, which this config points at glm-5.2. |
 | 401 | Key wrong or expired. Path A: re-run Step 4's probe, re-export a fresh key, re-run the Step 5A writer, and re-run the `HTTP 200` check before handing off. Path B: `ZG_API_KEY` not exported in the proxy terminal. A 401 also takes down the auto-mode classifier, so fix this before diagnosing any gate symptom. |
 | Model not found | Typo vs the Step 1 list, or (Path B) model missing from `model_list`. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |
-| Config edits ignored | Old session still running; or `claude` was launched from a directory other than the project holding `.claude/settings.local.json` (project config is scoped to that directory by design — either run the skill in the other project, or switch to the every-project scope from Step 2 question 3); or leftover `ANTHROPIC_*` in the global `env` or the shell — re-run Step 3. |
+| Config edits ignored | Old session still running; or `claude` was launched from a directory other than the project holding `.claude/settings.json` (project config is scoped to that directory by design — either run the skill in the other project, or switch to the every-project scope from Step 2 question 3); or leftover `ANTHROPIC_*` in the global `env` or the shell — re-run Step 3. |

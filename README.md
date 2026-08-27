@@ -28,7 +28,7 @@ The leading space keeps them out of your shell history. They last as long as the
 
 ## What is and isn't touched
 
-**Claude Code** — your global `~/.claude/settings.json` (hooks, plugins, status line, your `/model` choice) is never written. The config goes to `.claude/settings.local.json` in one project; deleting that file undoes everything.
+**Claude Code** — your global `~/.claude/settings.json` (hooks, plugins, status line, your `/model` choice) is never written. The config goes to `.claude/settings.json` in one project; deleting that file undoes everything.
 
 **Codex** — Codex has no per-project configuration, so this cannot be confined to a folder. Your `~/.codex/config.toml` is never written; what gets added is one profile file plus a bridge directory, and it only applies when you launch with `--profile`. Existing Codex sessions are unaffected.
 
@@ -37,14 +37,14 @@ The leading space keeps them out of your shell history. They last as long as the
 With the variables exported above, from the project you want on 0G:
 
 ```bash
-mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.local.json -o .claude/settings.local.json
+mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
 ```
 
 Restart Claude Code — config is read at launch — then check `/status`: the Base URL should read `https://router-api.0g.ai`.
 
 That is the whole setup. The file arrives on `glm-5.2`; to use a different model edit one line before restarting (see [Switching the main model](#after-its-configured) below for which models work and which need the bridge).
 
-**Uninstall:** `rm .claude/settings.local.json` and restart.
+**Uninstall:** `rm .claude/settings.json` and restart.
 
 ## Set up — Codex
 
@@ -97,7 +97,7 @@ Then say **“set up 0G PC” / “接入 0G PC”** (Claude Code) or **“set u
 
 **Restart first.** Config is read at launch, so nothing changes in a session that was already open. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`. The startup line `[claude-code:unrecognized_model]` is expected and harmless: Claude Code simply doesn't know 0G's model names.
 
-**What the file contains** — `.claude/settings.local.json` in the project:
+**What the file contains** — `.claude/settings.json` in the project:
 
 ```json
 {
@@ -117,13 +117,15 @@ Then say **“set up 0G PC” / “接入 0G PC”** (Claude Code) or **“set u
 
 Every tier points at a 0G model, so whichever one Claude Code reaches for, the request stays on 0G. No credential appears anywhere in the file — that comes from `ANTHROPIC_AUTH_TOKEN` in your shell.
 
+This is the project settings file, meant to be committed. If you also keep a personal `.claude/settings.local.json`, that one wins — Claude Code loads `local` after `project` — so a setting that seems not to apply is worth checking there first.
+
 **Switching models in a session.** `/model` moves between the tiers above — Opus and Fable land on `glm-5.2`, Sonnet and Haiku on `0gm-1.0-35b-a3b`. No restart needed.
 
 > ⚠️ **Do not pick a "(1M context)" variant.** Claude Code derives the auto-mode safety classifier from the Sonnet tier and copies your main model's `[1m]` tag onto the result, asking the router for `0gm-1.0-35b-a3b[1m]` — an ID it does not serve. The classifier becomes unreachable and auto mode fails closed on every Bash, git and network call, while chat keeps working, so it reads like the model is fine and the tools are broken.
 >
 > Your `/model` choice is remembered in `~/.claude/settings.json`, so this survives restarts and follows you into other projects. The skill will then refuse to write a new config until you clear it — that refusal is the guard working, not a bug. Fix it with `/model` and a plain (non-1M) entry.
 
-**Switching the main model** — edit `.claude/settings.local.json` and restart. Three fields move together:
+**Switching the main model** — edit `.claude/settings.json` and restart. Three fields move together:
 
 ```json
 "ANTHROPIC_MODEL": "deepseek-v4-flash",
@@ -160,7 +162,7 @@ Check the current list yourself with `curl -s https://router-api.0g.ai/v1/models
 
 And whichever model you pick, don't append `[1m]` to its name — same failure as the `/model` warning above.
 
-**Going back to Anthropic** — `rm .claude/settings.local.json` and restart. Nothing else to undo.
+**Going back to Anthropic** — `rm .claude/settings.json` and restart. Nothing else to undo.
 
 ### Codex
 

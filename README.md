@@ -36,6 +36,8 @@ The leading space keeps them out of your shell history. They last as long as the
 
 ![Claude Code setup: export ANTHROPIC_AUTH_TOKEN in the terminal you will restart in, curl one settings.json into the project, pick a model, then verify with /status and any Bash call](Assets/0g-pc-claude-code-setup.png)
 
+### User workflow
+
 Three steps. The third one is where it goes wrong.
 
 ```bash

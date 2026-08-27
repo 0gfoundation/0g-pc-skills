@@ -1,68 +1,109 @@
 # 0G PC Skills
 
-Agent Skills that configure **Claude Code** and **Codex** to run on [0G Private Computer](https://pc.0g.ai) (`router-api.0g.ai`) — TEE-backed inference with OpenAI/Anthropic-compatible APIs.
+Ready-made configuration that points **Claude Code** and **Codex** at [0G Private Computer](https://pc.0g.ai) (`router-api.0g.ai`) — TEE-backed inference with OpenAI/Anthropic-compatible APIs.
 
-Both skills follow the open [Agent Skills](https://agentskills.io) format (`SKILL.md`), so one repository serves both clients; only the install entry point differs. Every config the skills produce was verified end-to-end (real sessions, real tool calls) on 2026-08-26 with Claude Code 2.1.246, Codex CLI 0.145.0, and LiteLLM 1.98.0.
+Setup is: export your key, download a config file, restart. The config files live in [`configs/`](configs/) — they are ordinary files you can read, diff, and edit. Two Agent Skills ([`skills/`](skills/)) can walk you through the same steps in a session if you prefer that to reading this page.
 
-| Skill | For | What it does |
+Verified end-to-end on 2026-08-27 with Claude Code 2.1.246, Codex CLI 0.145.0 / 0.149.1, and LiteLLM 1.98.0.
+
+## Your key never goes in a file
+
+The config files carry **no credentials**. Your key lives in a shell environment variable and nothing else, which is why these files are safe to read, safe to diff, and safe to commit — a team can share one config in the repo, and each person brings their own key.
+
+Two variable names, because two different programs read them:
+
+| Variable | Read by | Needed for |
 |---|---|---|
-| [`0g-pc-model-config-claude`](skills/0g-pc-model-config-claude/SKILL.md) | Claude Code | Direct connection (glm-5.2 + 0GM permission gate) or LiteLLM bridge for openai-only models (glm-5.3 / kimi-k3 / qwen), with the permission-gate model configured correctly |
-| [`0g-pc-model-config-codex`](skills/0g-pc-model-config-codex/SKILL.md) | Codex | LiteLLM bridge (mandatory — Codex 0.145+ speaks only the Responses API, which the 0G Router does not serve) + provider/profile config |
+| `ANTHROPIC_AUTH_TOKEN` | Claude Code | Claude Code setup |
+| `ZG_API_KEY` | the LiteLLM bridge | Codex setup |
 
-## What these skills will and won't touch
+Same key, so export both at once:
 
-Read this before installing. The two skills make different promises, because the two clients differ.
+```bash
+ export ZG_API_KEY='sk-…'
+ export ANTHROPIC_AUTH_TOKEN="$ZG_API_KEY"
+```
 
-**Claude Code** — your global `~/.claude/settings.json` (hooks, plugins, status line, your `/model` choice) is **read but never written**, whichever scope you pick. By default the config goes into `.claude/settings.local.json` in the project you run it from; undoing it is deleting that one file, and the skill adds a `.gitignore` rule first so the key never reaches a commit. If you'd rather have 0G apply everywhere, you can ask for that — it writes a standalone `~/.0g/0g-settings.json` you load with `claude --settings`, which still leaves your global settings alone. The skill states all of this before it asks you anything.
+The leading space keeps them out of your shell history. They last as long as the terminal — a new terminal needs them again.
 
-**Codex** — Codex has no per-project configuration, so this one cannot be confined to a folder; be aware of that going in. What it does guarantee: your `~/.codex/config.toml` is **read, never written**. Everything it adds is one new file (`~/.codex/zg-<model>.config.toml`) plus a bridge directory (`~/.0g-litellm/`), and it only takes effect when you launch with `--profile zg-<model>` — existing Codex sessions are unaffected. Deleting those undoes everything.
+## What is and isn't touched
 
-Neither skill writes your API key anywhere you did not choose, and neither asks you to paste it into the chat.
+**Claude Code** — your global `~/.claude/settings.json` (hooks, plugins, status line, your `/model` choice) is never written. The config goes to `.claude/settings.local.json` in one project; deleting that file undoes everything.
 
-## Install — Claude Code
+**Codex** — Codex has no per-project configuration, so this cannot be confined to a folder. Your `~/.codex/config.toml` is never written; what gets added is one profile file plus a bridge directory, and it only applies when you launch with `--profile`. Existing Codex sessions are unaffected.
 
-Paste this in a terminal, then open a new one:
+## Set up — Claude Code
+
+With the variables exported above, from the project you want on 0G:
+
+```bash
+mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.local.json -o .claude/settings.local.json
+```
+
+Restart Claude Code — config is read at launch — then check `/status`: the Base URL should read `https://router-api.0g.ai`.
+
+That is the whole setup. The file arrives on `glm-5.2`; to use a different model edit one line before restarting (see [Switching the main model](#after-its-configured) below for which models work and which need the bridge).
+
+**Uninstall:** `rm .claude/settings.local.json` and restart.
+
+## Set up — Codex
+
+Codex cannot reach the 0G router directly — it speaks only the Responses API, which the router does not serve — so a local LiteLLM proxy translates. Three files, then a proxy.
+
+```bash
+mkdir -p ~/.0g-litellm && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/litellm-config.yaml -o ~/.0g-litellm/litellm-config.yaml
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg_patch.py -o ~/.0g-litellm/zg_patch.py
+mkdir -p ~/.codex && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg-glm53.config.toml -o ~/.codex/zg-glm53.config.toml
+```
+
+Start the proxy in **its own terminal** and leave it running (first launch takes a minute or two to install dependencies):
+
+```bash
+cd ~/.0g-litellm && uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
+```
+
+Then, in any terminal:
+
+```bash
+ export ZG_LITELLM_KEY='sk-anything'    # the local proxy does not authenticate
+codex --profile zg-glm53
+```
+
+`--profile` is required every time; without it you get your ordinary Codex, which is also how you switch back.
+
+**Uninstall:** `rm ~/.codex/zg-glm53.config.toml && rm -rf ~/.0g-litellm`.
+
+## Using the skills instead
+
+If you would rather be walked through it, install either skill and ask for it by name. They perform the same steps and explain what each one does.
 
 ```bash
 mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL \
   https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-claude/SKILL.md \
   -o ~/.claude/skills/0g-pc-model-config-claude/SKILL.md
-```
 
-A skill is a single `SKILL.md`, so that is the whole install — no repository left on your disk. In any session say **“set up 0G PC” / “接入 0G PC”**, or invoke it explicitly with `/0g-pc-model-config-claude`.
-
-**Just one project?** Put the same file in that project's `.claude/skills/0g-pc-model-config-claude/` instead of `~/.claude/skills/` — it then travels with the repo and is available only there.
-
-**Update:** re-run the curl. **Uninstall:** `rm -rf ~/.claude/skills/0g-pc-model-config-claude`.
-
-## Install — Codex
-
-Codex discovers skills in `~/.codex/skills/` (or `$CODEX_HOME/skills` if you set it). Paste this, then open a new terminal:
-
-```bash
 mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \
   https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-codex/SKILL.md \
   -o ~/.codex/skills/0g-pc-model-config-codex/SKILL.md
 ```
 
-Then in Codex say **“set up 0G PC in Codex” / “在 Codex 接入 0G PC”**. Codex has no per-project skills — `~/.codex/skills/` is the only location.
+Then say **“set up 0G PC” / “接入 0G PC”** (Claude Code) or **“set up 0G PC in Codex” / “在 Codex 接入 0G PC”**.
 
-**Update:** re-run the curl. **Uninstall:** `rm -rf ~/.codex/skills/0g-pc-model-config-codex`.
+**Update:** re-run the curl. **Uninstall:** `rm -rf` the skill directory.
 
 ## After it's configured
 
 ### Claude Code
 
-**Restart first.** Config is read at launch, so nothing changes in the session that ran the skill. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`. The startup line `[claude-code:unrecognized_model]` is expected and harmless: Claude Code simply doesn't know 0G's model names.
+**Restart first.** Config is read at launch, so nothing changes in a session that was already open. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`. The startup line `[claude-code:unrecognized_model]` is expected and harmless: Claude Code simply doesn't know 0G's model names.
 
-**What got written** — `.claude/settings.local.json` in the project:
+**What the file contains** — `.claude/settings.local.json` in the project:
 
 ```json
 {
   "env": {
     "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
-    "ANTHROPIC_AUTH_TOKEN": "sk-…",          // injected from $ZG_API_KEY, never typed in chat
-    "ANTHROPIC_API_KEY": "",                 // blanked so the token above is the one used
+    "ANTHROPIC_API_KEY": "",                 // blanked so your exported token is the one used
     "ANTHROPIC_MODEL": "glm-5.2",            // the main model
     "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.2",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
@@ -74,7 +115,7 @@ Then in Codex say **“set up 0G PC in Codex” / “在 Codex 接入 0G PC”**
 }
 ```
 
-Every tier points at a 0G model, so whichever one Claude Code reaches for, the request stays on 0G.
+Every tier points at a 0G model, so whichever one Claude Code reaches for, the request stays on 0G. No credential appears anywhere in the file — that comes from `ANTHROPIC_AUTH_TOKEN` in your shell.
 
 **Switching models in a session.** `/model` moves between the tiers above — Opus and Fable land on `glm-5.2`, Sonnet and Haiku on `0gm-1.0-35b-a3b`. No restart needed.
 
@@ -144,10 +185,10 @@ uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 
 
 ## What you need
 
-- A 0G PC inference API key (`sk-…`) from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. Export it before you start — ` export ZG_API_KEY='sk-…'` (the leading space keeps it out of your shell history), or put a `ZG_API_KEY=` line in the project's `.env`. The skills read it from there and inject it directly, so the key never passes through the conversation. If neither is present they will ask you to set one and write nothing until you do — they never leave a placeholder behind for you to fill in later.
-- For the LiteLLM paths: [uv](https://docs.astral.sh/uv/) or `pip`.
+- A 0G PC inference API key (`sk-…`) from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. Export it as shown above; do not put it in a file inside a repository, where one `git add -A` can commit it.
+- For Codex: [uv](https://docs.astral.sh/uv/) or `pip`, for the LiteLLM bridge.
 
-Live model list (the skills check this before configuring anything):
+Live model list — worth checking before picking a model, since the table below ages:
 
 ```bash
 curl -s https://router-api.0g.ai/v1/models

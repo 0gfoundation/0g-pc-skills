@@ -143,19 +143,23 @@ Then, every launch, read the `model:` line in the startup banner: your configure
 
 ## Using the skills instead
 
-If you would rather be walked through it, install either skill and ask for it by name. They perform the same steps and explain what each one does.
+If you would rather be walked through it, install the one for your client and ask for it by name. It performs the same steps and explains what each one does.
+
+**Claude Code** — install it, then say **"set up 0G PC"**.
 
 ```bash
 mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL \
   https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-claude/SKILL.md \
   -o ~/.claude/skills/0g-pc-model-config-claude/SKILL.md
+```
 
+**Codex** — install it, then say **"set up 0G PC in Codex"**.
+
+```bash
 mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \
   https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-codex/SKILL.md \
   -o ~/.codex/skills/0g-pc-model-config-codex/SKILL.md
 ```
-
-Then say **"set up 0G PC"** (Claude Code) or **"set up 0G PC in Codex"** (Codex).
 
 **Update:** re-run the curl. **Uninstall:** `rm -rf` the skill directory.
 

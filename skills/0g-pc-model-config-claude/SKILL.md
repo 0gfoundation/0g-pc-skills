@@ -14,7 +14,7 @@ Configure Claude Code to run on 0G Private Computer's inference API. Every confi
    - **Default:** the config goes to `<repo root>/.claude/settings.local.json`. Rollback is deleting one file.
    - The user *may* choose to have 0G apply everywhere (Step 2, question 3). Honour it — but it is theirs to ask for, never your default and never silent: it goes to a standalone `~/.0g/0g-settings.json` loaded with `claude --settings`, which still leaves `~/.claude/settings.json` untouched.
    **State this to the user before asking anything** (Step 2); they should not have to infer it from the result.
-2. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. Resolve the key in this order: (1) the `ZG_API_KEY` environment variable; (2) a `ZG_API_KEY=` line in the project's `.env`; (3) ask the user to `export ZG_API_KEY='sk-…'` and continue. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not. The key lands in a file inside the user's repository, so it may only be written once git is confirmed to be ignoring that file — the writer script in Step 5 enforces this and aborts if it cannot.
+2. **Never write a placeholder key; never let the key into the transcript.** These are one rule, not two — the config must be usable the moment it lands on disk, *and* the key must never pass through the conversation. Writing a literal `YOUR_API_KEY` and trusting the user to swap it in later produces a config that 401s on the very next launch, and the failure surfaces in a session this skill cannot observe. The key comes from one place only: the `ZG_API_KEY` environment variable. If it is not set, ask the user to `export ZG_API_KEY='sk-…'` and continue — do not go looking for it in `.env` or anywhere else in the project. A key sitting in a file inside the repository is one `git add -A` away from being committed, and this skill's gitignore guard covers only the files it writes, not the ones it might read. Never `cat` the key, never echo it, never put it on a command line, and never pass it through an Edit/Write tool call — the writer script in Step 5 reads it from the environment and injects it, so the value never enters your context. **If no key resolves, write no file at all** and say so: a missing config is recoverable, a broken one silently is not. The key lands in a file inside the user's repository, so it may only be written once git is confirmed to be ignoring that file — the writer script in Step 5 enforces this and aborts if it cannot.
 3. **Only use configs from this skill.** They are tested; improvised combinations fail in ways that are hard to diagnose — the permission-gate entries in particular (hard rule 4).
 4. **Permission-gate iron rule:** in auto mode the safety classifier resolves through the **Sonnet** tier — not Haiku. On a third-party router that means `ANTHROPIC_DEFAULT_SONNET_MODEL` when it is set *and* the value is recognised, otherwise the built-in `claude-sonnet-5` mapped through `modelOverrides`. So `modelOverrides["claude-sonnet-5"]` must point at a fast non-reasoning model (`0gm-1.0-35b-a3b`), never at a reasoning model (glm-5.2, glm-5.3, kimi-k3): every non-read-only action triggers a yes/no safety call on that slot, and a reasoning model turns it into a ~950-token reasoning pass that times out — every Bash/git/network action then fails with "model is temporarily unavailable" while chat keeps working. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is *not* the gate; it is kept on a fast model for unrelated background work.
 5. **This skill cannot switch the current session.** Config edits take effect on the next `claude` launch. Finish by telling the user to restart and run the verification steps — do not claim the current session now uses 0G.
@@ -65,7 +65,7 @@ Then, with the model list on screen, ask all five at once. Every one has a defau
 4. **Permission mode?** State both costs — do not set this silently:
    - `acceptEdits` *(default)* — file edits pass automatically, Bash asks each time. No dependency on the safety classifier, so a router hiccup cannot take the session down.
    - `auto` — the classifier judges non-read-only actions, so far fewer confirmations; but it is an extra request against the router, and if it fails (router wobble, a `[1m]` model name, an expired key) Claude Code fails closed and refuses **every** non-read-only tool. Choose this only if the gate config in Step 5A has been verified.
-5. **Key source?** `ZG_API_KEY` already exported / a `ZG_API_KEY=` line in `.env` / you will export one now. *Default: whichever Step 4's probe finds.*
+5. **Key source?** Is `ZG_API_KEY` already exported, or will they export it now? *Default: whatever Step 4's probe finds.* There is no other accepted source.
 
 ### Step 3 — Inspect existing config (read only — never modify it)
 
@@ -80,10 +80,9 @@ Tool: **Bash**. Probe for a key without reading its value — both commands repo
 
 ```bash
 [ -n "$ZG_API_KEY" ] && echo "env ZG_API_KEY: present (${#ZG_API_KEY} chars)" || echo "env ZG_API_KEY: absent"
-grep -q '^ZG_API_KEY=' .env 2>/dev/null && echo ".env: has ZG_API_KEY" || echo ".env: no ZG_API_KEY"
 ```
 
-If neither reports a key, stop and tell the user:
+If it reports absent, stop and tell the user:
 
 > Create an inference key (starts with `sk-`) at pc.0g.ai → Dashboard → API Keys. For confidential mode (Path A + Private), select the **Private** trust mode when creating it. Then run ` export ZG_API_KEY='sk-…'` in this shell — the leading space keeps it out of shell history — and tell me to continue.
 
@@ -118,15 +117,9 @@ Tool: **Bash**. Write it with this script — **not** with Edit/Write. The scrip
 
 ```bash
 python3 - <<'PY'
-import json, os, pathlib, re, subprocess, sys
+import json, os, pathlib, subprocess, sys
 
 key = os.environ.get("ZG_API_KEY", "").strip()
-if not key:
-    env = pathlib.Path(".env")
-    if env.is_file():
-        m = re.search(r'^ZG_API_KEY=(.+)$', env.read_text(), re.M)
-        if m:
-            key = m.group(1).strip().strip('"').strip("'")
 if not key:
     sys.exit("no ZG_API_KEY resolved — refusing to write a placeholder config (hard rule 2)")
 

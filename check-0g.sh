@@ -5,6 +5,7 @@ exec python3 - "$@" <<'PY'
 import json, os, pathlib, sys, urllib.request
 
 REASONING = {"glm-5.2", "glm-5.3", "glm-5", "kimi-k3", "deepseek-v4-pro", "minimax-m3"}
+# These are main-model candidates. The gate must not be one of them — it is checked below.
 problems = []
 
 def load(p):
@@ -37,7 +38,7 @@ for label, path in (("project local", ".claude/settings.local.json"),
                 f'model "{m}" (from {label}) carries [1m]. Claude Code copies that tag onto the\n'
                 f'  classifier it derives from the Sonnet tier, asking the router for an ID it does not\n'
                 f'  serve; auto mode then refuses every non-read-only tool while chat keeps working.\n'
-                f'  Fix: /model without the (1M context) variant, or "model": "glm-5.2" in the project config.')
+                f'  Fix: /model without the (1M context) variant, or "model": "glm-5.3" in the project config.')
         break
 
 # 2 — the permission gate

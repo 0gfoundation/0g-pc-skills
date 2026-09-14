@@ -1,6 +1,6 @@
 ---
 name: 0g-pc-model-config-claude
-description: Configure Claude Code to use 0G Private Computer (pc.0g.ai, router-api.0g.ai) as its model backend, with tested model combinations (glm-5.2 / glm-5.3 / kimi-k3 / qwen via LiteLLM) and a correctly configured permission-gate model. Use when the user wants to set up, connect, switch, or fix 0G PC / 0G Private Computer / 0G router models in Claude Code. Triggers include "set up 0G PC", "connect Claude Code to 0G", "use 0G models in Claude Code", "接入 0G PC", "配置 0G", "把 Claude Code 接到 0G", "用 0G 的模型", "0G 配置不工作".
+description: Configure Claude Code to use 0G Private Computer (pc.0g.ai, router-api.0g.ai) as its model backend, with tested model combinations (glm-5.3 direct; glm-5.2 / kimi-k3 / qwen via LiteLLM) and a correctly configured permission-gate model. Use when the user wants to set up, connect, switch, or fix 0G PC / 0G Private Computer / 0G router models in Claude Code. Triggers include "set up 0G PC", "connect Claude Code to 0G", "use 0G models in Claude Code", "接入 0G PC", "配置 0G", "把 Claude Code 接到 0G", "用 0G 的模型", "0G 配置不工作".
 ---
 
 # 0G PC Setup for Claude Code
@@ -22,7 +22,7 @@ Point Claude Code at 0G Private Computer's inference API. The config is a file i
 curl -s https://router-api.0g.ai/v1/models | python3 -c "import json,sys; [print(m['id'], '+'.join(m.get('supported_formats',[])), m.get('context_length')) for m in json.load(sys.stdin)['data']]"
 ```
 
-Formats including `anthropic` work directly; `openai`-only ones (`glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`) need the bridge — see the last section. If the endpoint is unreachable, stop and report rather than proceed on a stale list.
+Formats including `anthropic` work directly; `openai`-only ones (`glm-5.2`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `qwen3.8-flash`) need the bridge — see the last section. If the endpoint is unreachable, stop and report rather than proceed on a stale list.
 
 ### 2 — Confirm the key is exported
 
@@ -52,7 +52,7 @@ If the effective model ends in `[1m]`, **stop**. Claude Code copies that tag ont
 mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
 ```
 
-It arrives on `glm-5.2`. For another anthropic-format model, change `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` together; if its context is under 983616 (`glm-5` 202752, `0gm-1.0-35b-a3b` 262144) lower `CLAUDE_CODE_MAX_CONTEXT_TOKENS` too, or long sessions fail hours later. The file holds no credential — tell the user it is safe to commit and share.
+It arrives on `glm-5.3` — text only; it does not accept images, and `fallbackModel` does not change that (it fires on overload, not on an unsupported request). For another anthropic-format model, change `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` together; if its context is under 983616 (`glm-5` 202752, `0gm-1.0-35b-a3b` 262144) lower `CLAUDE_CODE_MAX_CONTEXT_TOKENS` too, or long sessions fail hours later. The file holds no credential — tell the user it is safe to commit and share.
 
 ### 5 — Hand off
 
@@ -64,7 +64,7 @@ It arrives on `glm-5.2`. For another anthropic-format model, change `ANTHROPIC_M
 
 ## OpenAI-only models (LiteLLM bridge)
 
-`glm-5.3` / `kimi-k3` / `qwen3.8-max` / `minimax-m3` cannot reach Claude Code directly. Install the bridge files, start the proxy in its own terminal, then change two things in the config: `ANTHROPIC_BASE_URL` to `http://127.0.0.1:4000` and the three model fields to the chosen model.
+`glm-5.2` / `kimi-k3` / `qwen3.8-max` / `minimax-m3` / `qwen3.8-flash` cannot reach Claude Code directly. Install the bridge files, start the proxy in its own terminal, then change two things in the config: `ANTHROPIC_BASE_URL` to `http://127.0.0.1:4000` and the three model fields to the chosen model.
 
 ```bash
 mkdir -p ~/.0g-litellm
@@ -81,7 +81,7 @@ The bridge files are shared with the Codex setup, hence their path. The proxy do
 |---|---|
 | Auto mode: "xxx is temporarily unavailable, cannot determine the safety of …" | Read the model name in the message — it names the classifier model, and the fix follows from it. Gate model wrong: point `modelOverrides["claude-sonnet-5"]` at `0gm-1.0-35b-a3b` (hard rule 4 — Sonnet tier, not Haiku). |
 | That message names a model with a `[1m]` suffix (e.g. `0gm-1.0-35b-a3b[1m]`) | The session model carries `[1m]` and Claude Code copied the tag onto the derived classifier model; the router does not serve that ID. Drop the tag: `/model` without the (1M context) variant, or `"model": "glm-5.2"` in `.claude/settings.json`. The Step 5A writer refuses to run while this is in place. |
-| That message names your main model (e.g. `glm-5.2`) | The Sonnet-tier resolution returned nothing and the classifier fell back to the main model — either `ANTHROPIC_DEFAULT_SONNET_MODEL` is set to an unrecognised ID (remove it), or a fable/mythos main model sent the classifier to the Opus tier, which this config points at glm-5.2. |
+| That message names your main model (e.g. `glm-5.3`) | The Sonnet-tier resolution returned nothing and the classifier fell back to the main model — either `ANTHROPIC_DEFAULT_SONNET_MODEL` is set to an unrecognised ID (remove it), or a fable/mythos main model sent the classifier to the Opus tier, which this config points at glm-5.2. |
 | 401 | Key wrong or expired. Path A: re-run Step 4's probe, re-export a fresh key, re-run the Step 5A writer, and re-run the `HTTP 200` check before handing off. Path B: `ZG_API_KEY` not exported in the proxy terminal. A 401 also takes down the auto-mode classifier, so fix this before diagnosing any gate symptom. |
 | Model not found | Typo vs the Step 1 list, or (Path B) model missing from `model_list`. |
 | LiteLLM 404 "page not found" | Model prefix written as `openai/`; must be `hosted_vllm/`. |

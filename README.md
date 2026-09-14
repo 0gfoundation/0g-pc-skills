@@ -74,7 +74,7 @@ mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g
 claude
 ```
 
-Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. The config arrives working, on `glm-5.2`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
+Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. The config arrives working, on `glm-5.3`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
 
 **Step ③ is the one people miss.** Your key lives only in the shell you exported it in, so launching Claude Code from a different terminal returns a 401 that reads like a bad key. That is the cost of keeping credentials out of every file: every new terminal needs the export again.
 
@@ -82,9 +82,9 @@ Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is
 
 | You want | Do this |
 |---|---|
-| a different tier, without restarting | `/model` — Opus and Fable are `glm-5.2`, Sonnet and Haiku `0gm-1.0-35b-a3b`. **Never pick a "(1M context)" entry:** [it breaks every Bash, git and network call](docs/claude-code.md#dont-pick-a-1m-context-entry). |
+| a different tier, without restarting | `/model` — Opus and Fable are `glm-5.3`, Sonnet and Haiku `0gm-1.0-35b-a3b`. **Never pick a "(1M context)" entry:** [it breaks every Bash, git and network call](docs/claude-code.md#dont-pick-a-1m-context-entry). |
 | a different main model | Edit three fields and restart — [which models qualify, and the context ceiling that travels with them](docs/claude-code.md#switching-the-main-model). |
-| `glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `deepseek-v4-pro` | These speak OpenAI only and cannot reach Claude Code directly — [they need the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). |
+| `glm-5.2`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `qwen3.8-flash` | These speak OpenAI only and cannot reach Claude Code directly — [they need the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). |
 | to confirm you are really on 0G | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh \| sh` — it reads the effective model, the permission gate and the context ceiling, and says nothing when all three are right. |
 | out | `rm .claude/settings.json` and restart. Nothing else to undo. |
 

@@ -13,18 +13,34 @@ Config is read at launch, so nothing changes in a session that was already open.
   "env": {
     "ANTHROPIC_BASE_URL": "https://router-api.0g.ai",
     "ANTHROPIC_API_KEY": "",                 // blanked so your exported token is the one used
-    "ANTHROPIC_MODEL": "glm-5.2",            // the main model
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.2",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.2",
+    "ANTHROPIC_MODEL": "glm-5.3",            // the main model — text only, see below
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.3",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "0gm-1.0-35b-a3b",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "983616"
   },
+  "fallbackModel": ["0gm-1.0-35b-a3b"],      // used when glm-5.3 is overloaded or unavailable
   "modelOverrides": { "claude-sonnet-5": "0gm-1.0-35b-a3b" },
   "permissions": { "defaultMode": "acceptEdits" }
 }
 ```
 
 Every tier points at a 0G model, so whichever one Claude Code reaches for, the request stays on 0G. No credential appears anywhere in the file — that comes from `ANTHROPIC_AUTH_TOKEN` in your shell.
+
+### The main model is text only
+
+`glm-5.3` does not accept images. Pasting a screenshot into a session on the shipped config will fail — and `fallbackModel` will not rescue it, because that fallback fires on *overloaded or unavailable*, which an unsupported content type is not.
+
+On the direct path, the models that do accept images are `0gm-1.0-35b-a3b` (262144 context, TEE-attested) and the `claude-*` family (1M context, no TEE). For image **and video**, `qwen3.8-flash` handles both, but it speaks OpenAI only and therefore needs [the bridge](#openai-only-models-need-the-bridge).
+
+### What the fallback does and does not cover
+
+`fallbackModel` takes an **array** — `"fallbackModel": "x"` is rejected with `Expected array`. It is tried when the primary model is overloaded or unavailable, which is worth having on a third-party router: a wobble no longer ends the session.
+
+Two limits worth knowing:
+
+- **It is not a capability net.** A request the primary model cannot serve — an image, say — is an error about the request, not about availability, so the chain does not advance.
+- **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is one global number, not per model.** It is set for `glm-5.3` (1048576), while the fallback accepts 262144. A session that has already grown past that will not be rescued either; the fallback helps early, not late.
 
 This is the project settings file, meant to be committed. If you also keep a personal `.claude/settings.local.json`, that one wins — Claude Code loads `local` after `project` — so a setting that seems not to apply is worth checking there first.
 
@@ -40,16 +56,19 @@ Edit `.claude/settings.json` and restart. Three fields move together:
 
 Leave `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `modelOverrides.claude-sonnet-5` alone. The second one is the permission gate: point it at a reasoning model and every Bash, git and network call starts timing out under auto mode.
 
-These eight models speak the Anthropic API and can be swapped in by editing alone:
+These models speak the Anthropic API and can be swapped in by editing alone. The router's lineup shifts — `glm-5.2` was on this list until it dropped Anthropic support, and `glm-5.3` was on the bridge list until it gained it — so [check it live](../README.md#live-model-list) before trusting the table:
 
 | Model | Context | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` |
 |---|---|---|
-| `glm-5.2` | 1048576 | `983616` (unchanged) |
+| `glm-5.3` | 1048576 | `983616` (unchanged) |
 | `claude-fable-5` | 1000000 | `983616` |
 | `claude-opus-5` | 1000000 | `983616` |
 | `claude-opus-4-8` | 1000000 | `983616` |
 | `claude-sonnet-5` | 1000000 | `983616` |
 | `deepseek-v4-flash` | 1000000 | `983616` |
+| `deepseek-v4-pro` | 1000000 | `983616` |
+| `glm-5.3-flash` | 1000000 | `983616` |
+| `hy4-preview` | 1000000 | `983616` |
 | `0gm-1.0-35b-a3b` | 262144 | **`245760`** |
 | `glm-5` | 202752 | **`190080`** |
 
@@ -71,7 +90,7 @@ Your `/model` choice is remembered in `~/.claude/settings.json`, so this survive
 
 ## OpenAI-only models need the bridge
 
-`glm-5.3`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*` and `deepseek-v4-pro` cannot reach Claude Code directly. They need the same local LiteLLM bridge the Codex setup uses — install the two bridge files and start it in its own terminal:
+`glm-5.2`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*` and `qwen3.8-flash` cannot reach Claude Code directly. They need the same local LiteLLM bridge the Codex setup uses — install the two bridge files and start it in its own terminal:
 
 ```bash
 mkdir -p ~/.0g-litellm

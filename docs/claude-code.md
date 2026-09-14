@@ -4,6 +4,14 @@ Everything worth knowing once the setup works. Setting it up in the first place 
 
 Config is read at launch, so nothing changes in a session that was already open. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`.
 
+## What is and isn't touched
+
+Your global `~/.claude/settings.json` — hooks, plugins, status line, your `/model` choice — is **never written**. The config goes to `.claude/settings.json` in one project, and deleting that file undoes everything.
+
+It carries **no credentials**. The key lives in `ANTHROPIC_AUTH_TOKEN` in your shell and nowhere else, which is what makes the file safe to read, diff, and commit — a team shares one config and each person brings their own key. Shell variables belong to the terminal, not the directory, so every new terminal needs the export again. That is the cost of keeping the key out of every file.
+
+Codex differs: it has no per-project configuration, so [that setup cannot be confined to a folder](codex.md).
+
 ## What the config file contains
 
 `.claude/settings.json`, in the project:

@@ -1,52 +1,8 @@
 # 0G PC Skills
 
-Ready-made configuration that points **Claude Code** and **Codex** at [0G Private Computer](https://pc.0g.ai) (`router-api.0g.ai`) — TEE-backed inference with OpenAI/Anthropic-compatible APIs.
+Point **Claude Code** and **Codex** at [0G Private Computer](https://pc.0g.ai) (`router-api.0g.ai`) — TEE-backed inference, OpenAI/Anthropic-compatible. Export your key, download a config file, restart.
 
-Setup is: export your key, download a config file, restart. The config files live in [`configs/`](configs/) — they are ordinary files you can read, diff, and edit. Two Agent Skills ([`skills/`](skills/)) can walk you through the same steps in a session if you prefer that to reading this page.
-
-- **Before you start** — [what you need](#what-you-need) · [where your key lives](#your-key-never-goes-in-a-file) · [what gets written](#what-is-and-isnt-touched)
-- **Set it up** — [Claude Code](#set-up--claude-code) · [Codex](#set-up--codex) · [or let a skill do it](#using-the-skills-instead)
-- **Already set up** — [Claude Code reference](docs/claude-code.md) for switching models, the 1M-context trap and the bridge; [Codex reference](docs/codex.md) for the `--profile` flag and reading the banner
-- **Changing this repo** — [the verification protocols](verification/)
-
-## What you need
-
-This repo configures clients you already have; it does not install them. You only need the row for the client you are setting up — the two setups are independent.
-
-| Check | Needed for | If missing |
-|---|---|---|
-| `claude --version` | the Claude Code setup | `npm install -g @anthropic-ai/claude-code` |
-| `codex --version` | the Codex setup | `npm install -g @openai/codex` |
-| `uv --version` | the Codex setup — it is what runs the LiteLLM bridge | [docs.astral.sh/uv](https://docs.astral.sh/uv/), or use `pip` instead |
-
-Plus a **0G PC inference API key** (`sk-…`) from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. Do not put it in a file inside a repository, where one `git add -A` can commit it — the next section is where it goes instead.
-
-## Your key never goes in a file
-
-The config files carry **no credentials**. Your key lives in a shell environment variable and nothing else, which is why these files are safe to read, safe to diff, and safe to commit — a team can share one config in the repo, and each person brings their own key.
-
-Three variable names, because three different programs read them — but only two of them carry your key:
-
-| Variable | Read by | Value |
-|---|---|---|
-| `ANTHROPIC_AUTH_TOKEN` | Claude Code | your key |
-| `ZG_API_KEY` | the LiteLLM bridge, on its way out to 0G | your key |
-| `ZG_LITELLM_KEY` | Codex, talking to the bridge on your own machine | any string — the bridge does not authenticate |
-
-The first two take the same key, so export both at once:
-
-```bash
- export ZG_API_KEY='sk-…'
- export ANTHROPIC_AUTH_TOKEN="$ZG_API_KEY"
-```
-
-The leading space keeps them out of your shell history. They last as long as the terminal — a new terminal needs them again.
-
-## What is and isn't touched
-
-**Claude Code** — your global `~/.claude/settings.json` (hooks, plugins, status line, your `/model` choice) is never written. The config goes to `.claude/settings.json` in one project; deleting that file undoes everything.
-
-**Codex** — Codex has no per-project configuration, so this cannot be confined to a folder. Your `~/.codex/config.toml` is never written; what gets added is one profile file plus a bridge directory, and it only applies when you launch with `--profile`. Existing Codex sessions are unaffected.
+The configs in [`configs/`](configs/) are ordinary files: readable, diffable, and **carrying no credentials**, so a team can commit one and each person brings their own key. Your global `~/.claude/settings.json` is never written — [what is and isn't touched](docs/claude-code.md#what-is-and-isnt-touched).
 
 ## Set up — Claude Code
 
@@ -55,6 +11,8 @@ The leading space keeps them out of your shell history. They last as long as the
 ### User workflow
 
 Two steps. The second one is where it goes wrong.
+
+Needs `claude` already installed (`claude --version`; otherwise `npm install -g @anthropic-ai/claude-code`) and a 0G key from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys.
 
 **① Key and config**, from inside the project you want on 0G. One line: `&&` runs it all in this shell, so the export stays put — which is where Claude Code will look for it.
 
@@ -95,6 +53,8 @@ Codex cannot reach the 0G router directly — it speaks only the Responses API, 
 That bridge makes this the heavier of the two paths, and in two more ways besides: **every launch needs `--profile`**, and **Codex has no per-project configuration**, so unlike the Claude Code setup this cannot be kept inside one folder.
 
 ### User workflow
+
+Needs `codex` (`npm install -g @openai/codex`) and [`uv`](https://docs.astral.sh/uv/) — `uv` is what runs the LiteLLM bridge, though `pip` works too. Same 0G key as above.
 
 **Two terminals, and they stay two.** The bridge occupies one for as long as you use Codex on 0G; Codex itself runs in the other. Close the first and every session in the second stops working.
 

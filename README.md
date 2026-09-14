@@ -114,10 +114,12 @@ against Anthropic, and that token is no use once the base URL points at 0G.)
 Install all three:
 
 ```bash
-for s in setup switch-model uninstall; do mkdir -p ~/.claude/skills/0g-pc-$s && curl -fsSL \
-  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-$s/SKILL.md \
-  -o ~/.claude/skills/0g-pc-$s/SKILL.md; done
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s skills
 ```
+
+Same script as the setup command, and the only subcommand that writes outside a project — the
+skills go in `~/.claude/skills`, where Claude Code looks for them. It takes no key, and they
+register without a restart. `bash -s skills --uninstall` removes them again.
 
 **If you installed the old `0g-pc-model-config-claude`, remove it.** Deleting it here does not
 delete it from your machine, and the copy you have competes with these three for the same

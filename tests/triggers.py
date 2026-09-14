@@ -12,8 +12,11 @@ import pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The three Claude skills that must not overlap each other.
 UNDER_TEST = ("0g-pc-setup", "0g-pc-switch-model", "0g-pc-uninstall")
-# Retired, still on disk until #86; Codex is a different client entirely.
-OUT_OF_SCOPE = ("0g-pc-model-config-claude", "0g-pc-model-config-codex")
+# A different client entirely, reached through a local bridge.
+OUT_OF_SCOPE = ("0g-pc-model-config-codex",)
+# Split into the three above and removed in #86. Checked for rather than ignored:
+# while it is present its triggers compete with all three of them.
+RETIRED = "0g-pc-model-config-claude"
 
 # Each input must match trigger phrases from exactly one skill.
 MATRIX = [
@@ -121,6 +124,15 @@ def main():
         else:
             fails.append(f"{text!r} -> {got or 'ambiguous'}, wanted {want}")
             print(f"  FAIL  {text:24} -> {got or 'ambiguous'}  hits={ {k: v[0] for k, v in hits.items()} }")
+
+    print("\nretired skill is gone")
+    if (ROOT / "skills" / RETIRED).exists():
+        fails.append(f"{RETIRED} is still in the repo; it competes with all three")
+        print(f"  FAIL  skills/{RETIRED}/ still present")
+    else:
+        print(f"  ok    skills/{RETIRED}/ removed"
+              "  (a copy already installed under ~/.claude/skills still competes —"
+              " see the README)")
 
     print("\nout of scope, reported not enforced")
     for n in OUT_OF_SCOPE:

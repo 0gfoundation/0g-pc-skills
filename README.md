@@ -95,19 +95,39 @@ Then, every launch, read the `model:` line in the startup banner: your configure
 
 `codex exec` takes the flag too, and the banner has one more failure mode worth knowing — both in the [Codex reference](docs/codex.md).
 
-## Using the skills instead
+## The skills
 
-If you would rather be walked through it, install the one for your client and ask for it by name. It performs the same steps and explains what each one does.
+Three slash commands for Claude Code, one job each. They are not a gentler way to run the command
+above — `/0g-pc-switch-model` and `/0g-pc-uninstall` do things no curl in this README does.
 
-**Claude Code** — install it, then say **"set up 0G PC"**.
+| Command | What it does |
+|---|---|
+| `/0g-pc-setup` | First-time setup: shows what the router actually serves, with the TEE tier and whether the model takes images, then hands you the install command to run yourself |
+| `/0g-pc-switch-model` | Changes the model, moving the context ceiling with it and leaving the permission gate alone |
+| `/0g-pc-uninstall` | Puts the project back, telling you first what it will restore and what it will remove |
+
+**They need a Claude Code that already starts.** A skill runs inside a session, so it cannot
+rescue one that will not open — if you land on `Not logged in`, re-run the installer from the
+[setup section](#set-up--claude-code) instead. (`/login` does not fix that one: it authenticates
+against Anthropic, and that token is no use once the base URL points at 0G.)
+
+Install all three:
 
 ```bash
-mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL \
-  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-claude/SKILL.md \
-  -o ~/.claude/skills/0g-pc-model-config-claude/SKILL.md
+for s in setup switch-model uninstall; do mkdir -p ~/.claude/skills/0g-pc-$s && curl -fsSL \
+  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-$s/SKILL.md \
+  -o ~/.claude/skills/0g-pc-$s/SKILL.md; done
 ```
 
-**Codex** — install it, then say **"set up 0G PC in Codex"**.
+**If you installed the old `0g-pc-model-config-claude`, remove it.** Deleting it here does not
+delete it from your machine, and the copy you have competes with these three for the same
+requests — while still teaching a setup that no longer works, one that ends at `Not logged in`.
+
+```bash
+rm -rf ~/.claude/skills/0g-pc-model-config-claude
+```
+
+**Codex** is a separate skill and a separate path — install it, then say **"set up 0G PC in Codex"**.
 
 ```bash
 mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \

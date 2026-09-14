@@ -16,6 +16,9 @@ KEY="${ZG_TEST_KEY:-}"
 [ -n "$KEY" ] || { echo "no key: set ZG_TEST_KEY or write ~/.0g-key" >&2; exit 2; }
 FAKE="sk-fake-key-that-the-router-will-reject"
 
+# stat is spelled differently on BSD and GNU; tests should run on both.
+mode_of() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
+
 pass=0; fail=0
 ok()   { pass=$((pass + 1)); printf '  ✅ %s\n' "$1"; }
 no()   { fail=$((fail + 1)); printf '  ❌ %s\n' "$1"; [ $# -lt 2 ] || printf '       %s\n' "$2"; }
@@ -52,7 +55,7 @@ out="$(sh "$INSTALL" claude --key "$FAKE" 2>&1)"; rc=$?
 # ------------------------------------------------------------------------ A
 echo "A — 纯净安装"
 sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1;        want "安装退出 0" pass $?
-[ "$(stat -f '%Lp' .claude/settings.local.json 2>/dev/null)" = 600 ] \
+[ "$(mode_of .claude/settings.local.json)" = 600 ] \
     && ok "local 权限 600" || no "local 权限 600"
 grep -q 'settings.local.json' .gitignore 2>/dev/null \
     && ok ".gitignore 已覆盖" || no ".gitignore 已覆盖"
@@ -136,7 +139,30 @@ out="$(sh "$INSTALL" claude --key "$KEY" 2>&1)"; rc=$?
 [ $rc -eq 0 ] && ! printf '%s' "$out" | grep -q '✗' \
     && ok "好配置自检静默通过" || no "好配置自检静默通过" "exit=$rc"
 
-# -------------------------------------------------------------------------
+# ------------------------------------------------------------------ #74
+echo "#74 — 不写死模型名与上限"
+fresh
+sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1
+python3 - <<'PY' && ok "上限 = live context_length × 15/16" || no "上限 = live context_length × 15/16"
+import json, pathlib, sys, urllib.request
+live = {m["id"]: m.get("context_length")
+        for m in json.load(urllib.request.urlopen("https://router-api.0g.ai/v1/models"))["data"]}
+e = json.loads(pathlib.Path(".claude/settings.json").read_text())["env"]
+sys.exit(0 if int(e["CLAUDE_CODE_MAX_CONTEXT_TOKENS"]) == live[e["ANTHROPIC_MODEL"]] * 15 // 16 else 1)
+PY
+
+# 配置指向 router 上没有的模型：必须点名模型，且不得让用户去怀疑自己的 key
+BROKEN="$WORK/nomodel"; mkdir -p "$BROKEN/configs/claude"; cp "$REPO/check-0g.sh" "$BROKEN/"
+python3 - "$REPO/configs/claude/settings.json" "$BROKEN/configs/claude/settings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["env"]["ANTHROPIC_MODEL"] = "glm-9.9-does-not-exist"
+json.dump(d, open(sys.argv[2], "w"), indent=2)
+PY
+fresh
+out="$(ZG_BASE_URL="file://$BROKEN" sh "$INSTALL" claude --key "$KEY" 2>&1)"; rc=$?
+[ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'glm-9.9-does-not-exist'     && printf '%s' "$out" | grep -qi 'not a problem with your key'     && ok "缺失的模型被点名，且明确与 key 无关"     || no "缺失的模型被点名，且明确与 key 无关" "exit=$rc"
+
+# ------------------------------------------------------------------------- 
 echo
 echo "通过 ${pass}，失败 ${fail}"
 [ "$fail" -eq 0 ]

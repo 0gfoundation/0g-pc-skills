@@ -104,4 +104,31 @@ Then two changes in `.claude/settings.json`: `ANTHROPIC_BASE_URL` to `http://127
 
 ## Going back to Anthropic
 
-`rm .claude/settings.json` and restart. Nothing else to undo.
+Two steps, and the second is the one that gets missed:
+
+```bash
+rm .claude/settings.json
+unset ANTHROPIC_AUTH_TOKEN
+```
+
+Deleting the file is not enough. The key stays in the shell, and Claude Code keeps using it — now against `api.anthropic.com`, where it is not valid. What you see is an authentication failure that reads as a broken account:
+
+```
+⚠ another auth source is set and takes precedence over your claude.ai login
+```
+
+Shell variables belong to the terminal, not the directory, so a leftover key also breaks unrelated projects opened from that same terminal. A fresh terminal works as well as `unset`. Then restart.
+
+## When everything claims the model is unavailable
+
+An empty 0G balance does not announce itself as a billing problem. It arrives as a 402 buried under whatever failed first — and what fails first is usually the permission gate:
+
+```
+0gm-1.0-35b-a3b is temporarily unavailable, so auto mode cannot determine the safety of Bash
+Switched to … because glm-5.3 returned an error that could not be retried (402 … "Insufficient balance")
+API Error: 402 Insufficient balance
+```
+
+Read top to bottom and you start editing the gate config, which is fine. Check the balance first: https://pc.0g.ai/dashboard/overview
+
+`check-0g.sh` cannot catch this — it runs without a key, and the balance endpoint rejects inference keys by design, so there is no way for it to ask.

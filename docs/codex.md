@@ -32,3 +32,9 @@ Check it in the startup banner, every launch.
 ## Switching models
 
 Each run of the skill writes another `~/.codex/zg-<name>.config.toml`. They all stay; `--profile` picks between them.
+
+## `Insufficient balance` (402)
+
+An empty 0G balance surfaces as a 402 from the bridge, not as anything that mentions billing. The bridge terminal is where it shows up most clearly — it is the process talking to the router. Top up at https://pc.0g.ai/dashboard/overview
+
+Worth separating from the `model:` line check above: a `gpt-*` banner means the profile never loaded, while a 402 means the profile loaded fine and the account has no credit. Different causes, and the fixes have nothing to do with each other.

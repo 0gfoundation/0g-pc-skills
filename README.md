@@ -42,7 +42,7 @@ Another project? Run it there too. macOS and Linux; on Windows use WSL or Git Ba
 | a different main model | Edit four fields and restart — [ask the router which ones qualify, and take the ceiling it gives you](docs/claude-code.md#ask-the-router-dont-trust-a-list). |
 | a model the router only serves in OpenAI format | It cannot reach Claude Code directly — [it needs the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). Which models those are changes; ask the router rather than a list. |
 | to confirm you are really on 0G | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh \| sh` — it reads the effective model, the permission gate and the context ceiling, and says nothing when all three are right. |
-| out | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh \| bash -s claude --uninstall`, then restart. Nothing to unset — [the key went with the file](docs/claude-code.md#going-back-to-anthropic). |
+| out | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh \| bash -s claude --uninstall`, then restart. It restores whatever `.claude/settings.json` was there before, and takes your key back out of `settings.local.json` — so there is nothing to unset [and nothing to tidy up by hand](docs/claude-code.md#going-back-to-anthropic). |
 
 If you plan to edit the file, [what it contains](docs/claude-code.md#what-the-config-file-contains) is worth two minutes first.
 

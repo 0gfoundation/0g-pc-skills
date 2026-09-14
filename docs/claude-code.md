@@ -149,7 +149,9 @@ One step, then restart:
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --uninstall
 ```
 
-It removes both files and its own block from `.gitignore`, leaving anything else in there alone. `rm -rf .claude` does the same job if you have nothing else in that folder.
+It puts the project back the way it found it. A `.claude/settings.json` that was there before the install is restored from the backup it kept; if there was none, the file is removed. `settings.local.json` loses the key and nothing else, so personal settings you keep there survive — the file itself stays if anything is left in it. Its own block comes out of `.gitignore`, leaving the rest alone.
+
+**Do not reach for `rm -rf .claude` instead.** It takes the backup with it, along with any config that was in that folder before 0G ever arrived.
 
 **There is nothing to unset.** This used to be the step everyone missed: the key lived in the shell, survived the deletion of the config, and Claude Code kept sending it — to `api.anthropic.com`, where it is not valid. The result was an authentication failure that reads as a broken account:
 
@@ -157,7 +159,7 @@ It removes both files and its own block from `.gitignore`, leaving anything else
 ⚠ another auth source is set and takes precedence over your claude.ai login
 ```
 
-That failure mode is gone, because the key goes away with the file. If you still see that message, something really is exporting `ANTHROPIC_AUTH_TOKEN` in your shell — an old `.zshrc` line, most likely.
+That failure mode is gone, because the uninstall takes the key out of the file. If you still see that message, something really is exporting `ANTHROPIC_AUTH_TOKEN` in your shell — an old `.zshrc` line, most likely.
 
 ## When everything claims the model is unavailable
 

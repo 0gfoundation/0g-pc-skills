@@ -16,6 +16,7 @@ ROUTER="${ZG_ROUTER:-https://router-api.0g.ai}"
 
 SETTINGS=".claude/settings.json"
 LOCAL=".claude/settings.local.json"
+BACKUP=".claude/settings.json.0g-backup"
 GITIGNORE=".gitignore"
 MARK_HEAD="# >>> 0g-pc install >>>"
 MARK_FOOT="# <<< 0g-pc install <<<"
@@ -37,7 +38,9 @@ Get a key at https://pc.0g.ai → Dashboard → API Keys.
 
 Writes .claude/settings.json (no credentials, safe to commit) and
 .claude/settings.local.json (your key, mode 600, added to .gitignore).
-Your global ~/.claude/settings.json is never written.
+A settings.json already in the project is kept as settings.json.0g-backup
+and put back by --uninstall. Your global ~/.claude/settings.json is never
+written.
 EOF
 }
 
@@ -82,10 +85,14 @@ have python3 || die "python3 is required and was not found."
 
 gitignore_add() {
     if [ -f "$GITIGNORE" ] && grep -qF "$MARK_HEAD" "$GITIGNORE"; then
-        return 0
+        # An install from before the backup existed wrote a block covering only the
+        # key file. Leaving it alone would let the backup reach a commit, so replace
+        # the block rather than return.
+        grep -qF "$BACKUP" "$GITIGNORE" && return 0
+        gitignore_remove
     fi
     [ ! -f "$GITIGNORE" ] || [ -z "$(tail -c 1 "$GITIGNORE")" ] || printf '\n' >> "$GITIGNORE"
-    printf '%s\n%s\n%s\n' "$MARK_HEAD" "$LOCAL" "$MARK_FOOT" >> "$GITIGNORE"
+    printf '%s\n%s\n%s\n%s\n' "$MARK_HEAD" "$LOCAL" "$BACKUP" "$MARK_FOOT" >> "$GITIGNORE"
 }
 
 gitignore_remove() {
@@ -113,16 +120,58 @@ PY
 # --------------------------------------------------------------- uninstall
 
 if [ "$MODE" = uninstall ]; then
-    removed=0
-    for f in "$LOCAL" "$SETTINGS"; do
-        if [ -e "$f" ]; then rm -f "$f"; removed=$((removed + 1)); fi
-    done
+    touched=0
+    restored=0
+
+    # The install merged one field into settings.local.json rather than replacing it,
+    # because a project may already keep personal settings there. Take the same field
+    # back out; deleting the file would undo more than the install ever did.
+    if [ -e "$LOCAL" ]; then
+        python3 - "$LOCAL" <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
+try:
+    doc = json.loads(p.read_text())
+except Exception:
+    doc = None
+if not isinstance(doc, dict):
+    p.unlink()                       # unreadable: nothing of the user's to preserve
+    raise SystemExit(0)
+env = doc.get("env")
+if isinstance(env, dict):
+    env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    if not env:
+        doc.pop("env", None)
+if doc:
+    p.write_text(json.dumps(doc, indent=2) + "\n")
+else:
+    p.unlink()                       # it held nothing but the key
+PY
+        touched=$((touched + 1))
+    fi
+
+    # settings.json was replaced wholesale, so hand the previous one back if the
+    # install found one to save. No backup means there was nothing here before.
+    if [ -e "$BACKUP" ]; then
+        mv -f "$BACKUP" "$SETTINGS"
+        touched=$((touched + 1)); restored=1
+    elif [ -e "$SETTINGS" ]; then
+        rm -f "$SETTINGS"
+        touched=$((touched + 1))
+    fi
+
     gitignore_remove
     [ ! -d .claude ] || rmdir .claude 2>/dev/null || true
-    if [ "$removed" -eq 0 ]; then
+
+    if [ "$touched" -eq 0 ]; then
         note "nothing to remove here — no 0G config in this project."
+    elif [ "$restored" -eq 1 ]; then
+        note "removed, and your previous $SETTINGS is back in place. Anything you
+changed in the 0G configuration after installing it — a different model, say — went
+with it. Your key is out of $LOCAL, so there is nothing to unset:
+start Claude Code in a new terminal and it is back on the Anthropic API."
     else
-        note "removed. Your key went with the file, so there is nothing to unset:
+        note "removed. Your key is out of $LOCAL, so there is nothing to unset:
 start Claude Code in a new terminal and it is back on the Anthropic API."
     fi
     exit 0
@@ -182,6 +231,14 @@ curl -fsSL "$BASE_URL/configs/claude/settings.json" -o "$tmp_cfg" \
     || die "could not fetch the config from $BASE_URL — check your connection."
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$tmp_cfg" \
     || die "the config fetched from $BASE_URL is not valid JSON."
+# Save a settings.json that was already here — once, and only once. On a second
+# install the file in place is the one this script wrote, and copying that over the
+# backup would destroy the user's original silently, with nothing left to restore.
+if [ -e "$SETTINGS" ] && [ ! -e "$BACKUP" ]; then
+    cp -p "$SETTINGS" "$BACKUP"
+    note "kept your existing $SETTINGS as $BACKUP — --uninstall puts it back."
+fi
+
 cat "$tmp_cfg" > "$SETTINGS"
 
 # The model to check the key with, and the context ceiling, both come from the router rather

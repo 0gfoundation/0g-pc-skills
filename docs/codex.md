@@ -29,6 +29,44 @@ Check it in the startup banner, every launch.
 | your configured model, e.g. `glm-5.3` | The profile loaded; requests go through the bridge. |
 | `gpt-*` | **Stop.** The profile was not found and Codex fell back to its own default — your request is going to `api.openai.com`. Codex reports nothing when a profile is missing, so this line is the only warning you get. |
 
+## The noise above the banner is not a fault
+
+Three things print on a normal launch and none of them is broken. They are here so you can match
+them and move on rather than chase them.
+
+```
+ERROR codex_models_manager::manager: failed to refresh available models:
+  failed to decode models response: missing field `models`;
+  body: {"data":[{"id":"glm-5.3",...}],"object":"list"}
+```
+
+Codex asks the provider for its model list and expects a `models` field; LiteLLM answers in
+OpenAI's shape, with `data`. It is logged at ERROR level, it appears twice, and it sits above
+everything else on screen — but nothing depends on it. Your `--profile` already names the model.
+
+```
+warning: Model metadata for `glm-5.3` not found. Defaulting to fallback metadata
+```
+
+Codex does not know 0G's model names. The Claude Code setup prints
+`[claude-code:unrecognized_model]` for the same reason.
+
+```
+Reading additional input from stdin...
+```
+
+Normal for `codex exec ... < /dev/null`.
+
+What is *not* noise is the `model:` line above — that one you read every time.
+
+## What a task costs
+
+A one-file task measured 168,081 tokens through this path. `glm-5.3` is a reasoning model and
+spends most of a budget before it writes anything, which also means **a small `max_tokens` comes
+back with empty content rather than a short answer** — 105 reasoning tokens went into answering
+"reply with exactly: BRIDGE OK". If you are testing the bridge by hand, give it room, or you will
+read an empty string as a broken bridge.
+
 ## Switching models
 
 Each run of the skill writes another `~/.codex/zg-<name>.config.toml`. They all stay; `--profile` picks between them.

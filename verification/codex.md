@@ -85,22 +85,50 @@ env -u ZG_LITELLM_KEY codex exec --profile zg-glm53 --skip-git-repo-check hi < /
 ## 4. 起代理（**独立终端，保持运行**）
 
 ```bash
-cd ~/.0g-litellm && uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
+cd ~/.0g-litellm
+ export ZG_API_KEY='sk-…'        # 真 key。桥是对 0G 认证的那一端，没有它代理起不来
+uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
 ```
 
-另一终端健康检查：
+**这行 export 不能省。** 它是 #43 两次失败的全部原因——当时协议里没写，执行环境里也就没有，代理起不来，端到端那步根本没跑到。首次启动会下载依赖，一到两分钟。
+
+另一终端，两项检查：
 
 ```bash
-curl -s -m 5 http://127.0.0.1:4000/health/liveliness && echo
+# a) 代理活着
+curl -s -m 10 http://127.0.0.1:4000/health/readiness && echo
+
+# b) 要用的模型在列表里 —— 桥只暴露 litellm-config.yaml 里配过的，
+#    router 上有而这里没配的，Codex 一样够不着
+curl -s -H "Authorization: Bearer sk-anything" http://127.0.0.1:4000/v1/models \
+  | python3 -c "import json,sys; print(', '.join(m['id'] for m in json.load(sys.stdin)['data']))"
 ```
+
+a) 期望 `{"status":"healthy",...}`；b) 期望列出 `glm-5.3, glm-5.2, kimi-k3, qwen3.8-max`。
+
+先单独打一次桥再交给 Codex，能把「桥不通」和「Codex 没配对」分开：
+
+```bash
+curl -s -m 120 -X POST http://127.0.0.1:4000/v1/chat/completions \
+  -H "Authorization: Bearer sk-anything" -H 'content-type: application/json' \
+  -d '{"model":"glm-5.3","max_tokens":400,"messages":[{"role":"user","content":"Reply with exactly: BRIDGE OK"}]}' \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['choices'][0]['message']['content'])"
+```
+
+⚠️ **`max_tokens` 不要给小。** glm-5.3 是推理模型，正文之前先花 reasoning token —— 上面这句话实测烧掉 105 个。给 20 的话 `content` 会返回**空字符串**，看着像桥坏了，其实只是预算被 reasoning 吃光。
+
+结果：a __ b __ 直打 __
 
 ## 5. 端到端 ⭐
 
 ```bash
 cd ~/Desktop/0g-probe-codex
  export ZG_LITELLM_KEY='sk-anything'
-codex exec --profile zg-glm53 --skip-git-repo-check "create hello.txt containing: hello from 0g, then cat it" < /dev/null
+codex exec --profile zg-glm53 --skip-git-repo-check --sandbox workspace-write \
+  "Create a file named hello.txt containing exactly the line: CODEX VIA 0G" < /dev/null
 ```
+
+**`--sandbox workspace-write` 不能省。** `codex exec` 默认 `read-only`，模型会规划、会执行只读命令、然后如实报告写入被拒——**退出码仍是 0**。不带这个标志，下面「文件落盘」那条必然不过，而失败原因与要测的东西毫无关系。
 
 **先看启动横幅的 `model:` 行** —— 这是最关键的一次观察：
 
@@ -109,12 +137,47 @@ codex exec --profile zg-glm53 --skip-git-repo-check "create hello.txt containing
 | `glm-5.3` | ✅ profile 已加载，请求走桥接 |
 | `gpt-*` | 🚨 **停** —— profile 没加载，请求正发往 `api.openai.com`。Codex 对缺失 profile 一声不吭；已登录的用户会拿到看似正常的回答 |
 
+**再核对文件真的落盘** —— 不要只看会话里的输出：
+
+```bash
+cat hello.txt          # 期望：CODEX VIA 0G
+```
+
+模型说「已创建」而文件不存在，是这条路径上真实出现过的情形（写入被沙箱拒绝时）。会话侧的说法不算证据。
+
 | 其它现象 | 结论 |
 |---|---|
-| Codex 规划、执行 shell、回读文件内容 | ✅ **端到端通过** |
+| Codex 规划、执行 shell、回读文件内容，且 `cat` 对得上 | ✅ **端到端通过** |
+| 模型报告写入被拒 / 文件不存在 | ❌ 少了 `--sandbox workspace-write` |
 | `stream disconnected` + 反复重连 | ❌ `zg_patch.py` 没加载 —— 代理是否从 `~/.0g-litellm/` 启动 |
 | `503 ... 127.0.0.1:4000` | ❌ 端口 4000 上是别的服务（第 0 步应已排除） |
-| 代理终端报 401 | ❌ 那个终端的 `ZG_API_KEY` 无效或未导出 |
+| 代理终端报 401 | ❌ 那个终端的 `ZG_API_KEY` 无效或未导出（见第 4 步） |
+| 代理终端报 402 | ❌ key 有效但账户没余额，配置没问题 |
+
+### 预期噪声：这三条都不是故障
+
+照下面原文 grep 对照，出现即正常，**不要照着它们去查**：
+
+```
+ERROR codex_models_manager::manager: failed to refresh available models:
+  ... failed to decode models response: missing field `models` ...
+  body: {"data":[{"id":"glm-5.3",...}],"object":"list"}
+```
+Codex 拉模型列表时期望字段 `models`，LiteLLM 返回的是 OpenAI 形状的 `data`。级别是 ERROR、位置在最顶上，但不影响任何功能。每次启动打两条。
+
+```
+warning: Model metadata for `glm-5.3` not found. Defaulting to fallback metadata
+```
+Codex 不认识 0G 的模型名。与 Claude Code 的 `[claude-code:unrecognized_model]` 同类。
+
+```
+Reading additional input from stdin...
+```
+`< /dev/null` 的正常回显。
+
+### 成本量级
+
+一次「创建一个文件」实测 **168,081 token**（首轮带只读沙箱重试的那次 318,678）。glm-5.3 把大部分预算花在 reasoning 上。跑这条协议前值得知道量级，别拿它当冒烟测试反复跑。
 
 结果：____________
 

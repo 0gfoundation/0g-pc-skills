@@ -27,19 +27,24 @@ probe 目录的作用只是别把测试产物丢进 clone。**它不再影响任
 cp ~/.claude/settings.json /tmp/global-before.json
 ```
 
-导出 key：
+准备 key —— **不导出**。新方案下 key 走文件，不走 shell；这里只把它放在手边，供第 1 步的命令使用：
 
 ```bash
- export ZG_API_KEY='sk-...'
- export ANTHROPIC_AUTH_TOKEN="$ZG_API_KEY"
-echo "${#ANTHROPIC_AUTH_TOKEN} chars"   # 只看长度
+ umask 077 && printf '%s' 'sk-...' > ~/.0g-key && ls -l ~/.0g-key   # 期望 -rw-------
 ```
 
-## 1. 取配置
+**并确认 shell 里干净**，否则后面第 3 步验不出真东西：
+
+```bash
+env | grep -c '^ANTHROPIC'   # 期望 0
+```
+
+## 1. 安装
 
 ```bash
 cd ~/Desktop/0g-probe
-mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --key "$(cat ~/.0g-key)"
+echo "期望 0，实得 $?"
 ```
 
 ## 2. 写入后检查
@@ -69,13 +74,15 @@ print('d)', '通过' if all(a.get(k)==b.get(k) for k in ks) else '失败: '+str(
 
 ## 3. 重启后验证 ⭐
 
-**必须重启**，且在**导出了 key 的终端**里：
+**必须重启**，且**特意换一个全新终端** —— 这一步的意义就在于此：key 在文件里，不在 shell 里，
+所以换终端必须照样能用。开一个新窗口，先自证它是干净的，再启动：
 
 ```bash
+env | grep -c '^ANTHROPIC'      # 期望 0 —— 若非 0，这一步验不出任何东西
 cd ~/Desktop/0g-probe && claude
 ```
 
-3.1 `/status` → Base URL 应为 `https://router-api.0g.ai`，Auth token 来源为 `ANTHROPIC_AUTH_TOKEN`。
+3.1 `/status` → Base URL 应为 `https://router-api.0g.ai`。
 （`[claude-code:unrecognized_model]` 是预期内的无害提示。）
 
 3.2 让会话执行：`echo ok > probe.txt && cat probe.txt`
@@ -124,3 +131,28 @@ mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL https://raw.gi
 
 - [ ] 通过 —— 第 3.2 步符合预期，第 2 步 a–d 全过
 - [ ] 未通过 —— 现象记录在第 3.2 步
+
+## 5. Skill 的模型清单（#65 起）
+
+交互式 Skill 只呈现直连能到的模型，Path B 不出现。
+
+```bash
+# a) 文档里不得有任何桥的痕迹
+grep -niE 'litellm|4000|bridge|zg_patch|ZG_API_KEY|uvx' "$REPO/skills/0g-pc-model-config-claude/SKILL.md"
+echo "a) 期望 1（无命中），实得 $?"
+
+# b) Skill 呈现的清单 == live 过滤结果
+curl -s https://router-api.0g.ai/v1/models | python3 -c "
+import json,sys
+d=json.load(sys.stdin)['data']
+print('\n'.join(sorted(m['id'] for m in d if 'anthropic' in (m.get('supported_formats') or []))))"
+```
+
+b) 与 Skill 实际列出的逐条比对：不得多一个 openai-only，不得漏一个 anthropic-native。
+
+c) TEE 标注必须三档：`TEE, model in enclave` / `TEE, proxied upstream` / `NO TEE`。
+把 `TeeML` 与 `TeeTLS` 合并成一个 "TEE" 标签算**不通过** —— 前者模型权重在 enclave 内，后者不是，
+而会话里没有任何东西会告诉用户自己在哪一档。
+
+d) 让 Skill 处理"把主模型换成 kimi-k3"（一个 openai-only 模型）：应当一句说明加一个指向
+`docs/claude-code.md` 的指引，**然后停下**。若它开始引导安装本地翻译层，算不通过。

@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Agent Skills that configure Claude Code and Codex to run on 0G Private Computer (router-api.0g.ai) with tested model combinations.",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "plugins": [
     {

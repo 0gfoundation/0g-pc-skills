@@ -10,8 +10,8 @@ Point Claude Code at 0G Private Computer's inference API. The config is a file i
 
 ## Hard rules
 
-1. **Never write `~/.claude/settings.json`.** It holds the user's hooks, plugins, status line and `/model` choice. Read it freely; the config you install goes to `<project>/.claude/settings.json` — the project settings file, which is meant to be committed and shared — and removing that one file undoes everything. If the project also has a `.claude/settings.local.json`, it takes precedence; check there when a setting appears not to apply.
-2. **The key never enters the conversation, and never enters a file.** It lives in the user's shell as `ANTHROPIC_AUTH_TOKEN`. Do not `cat` it, echo it, put it on a command line, or write it anywhere. The config file deliberately has no credential field — that is what makes it safe to commit.
+1. **Never write `~/.claude/settings.json`.** It holds the user's hooks, plugins, status line and `/model` choice. Read it freely; everything you install goes inside `<project>/.claude/` — `settings.json` for configuration (committed and shared) and `settings.local.json` for the key (mode 600, git-ignored). Local is loaded after project and wins, so check it when a setting appears not to apply.
+2. **The key never enters the conversation.** You do not ask for it, read it, or put it on a command line you run. It does now live in a file — `<project>/.claude/settings.local.json`, which is what makes a fresh terminal work — but the file is written by the **installer, run by the user**, not by you. Hand them the command and let them paste their own key into it. You may check that a credential is present; never print one. `settings.json`, the file that gets committed, still has no credential field.
 3. **Do not touch the permission gate.** `modelOverrides["claude-sonnet-5"]` must stay on `0gm-1.0-35b-a3b`. In auto mode the safety classifier resolves through the **Sonnet** tier, not Haiku; put a reasoning model there and every Bash, git and network call times out with "temporarily unavailable" while chat keeps working. `ANTHROPIC_DEFAULT_HAIKU_MODEL` is not the gate but is kept fast for background work.
 4. **Nothing takes effect until the next launch.** Finish by telling the user to restart — never claim the current session is now on 0G.
 
@@ -63,13 +63,19 @@ the strongest tier — say so rather than leaving them to notice.
 
 If the endpoint is unreachable, stop and report rather than proceed on a stale list.
 
-### 2 — Confirm the key is exported
+### 2 — See whether a key is already installed
 
 ```bash
-[ -n "$ANTHROPIC_AUTH_TOKEN" ] && echo "present (${#ANTHROPIC_AUTH_TOKEN} chars)" || echo "absent"
+python3 -c "
+import json,pathlib
+try: e=json.loads(pathlib.Path('.claude/settings.local.json').read_text()).get('env',{})
+except Exception: e={}
+k=e.get('ANTHROPIC_AUTH_TOKEN') or e.get('ANTHROPIC_API_KEY')
+print(f'credential present ({len(k)} chars)' if k else 'no credential installed')"
 ```
 
-Presence and length only, never the value. If absent, stop and ask the user to run ` export ANTHROPIC_AUTH_TOKEN='sk-…'` (leading space keeps it out of shell history). Do not look in `.env` or anywhere else in the project — a key in a repo file is one `git add -A` from being committed.
+Length only, never the value — do not `cat` that file. If one is present the user has run the
+installer before; Step 4 will overwrite it in place, which is how you change keys.
 
 ### 3 — Check for a `[1m]` conflict
 
@@ -85,19 +91,39 @@ else: print('no model pinned - fine')"
 
 If the effective model ends in `[1m]`, **stop**. Claude Code copies that tag onto the classifier it derives from the Sonnet tier, asking the router for `0gm-1.0-35b-a3b[1m]` — an ID it does not serve. Auto mode then fails closed on every non-read-only tool while chat still answers, reading as "model fine, tools broken". Have the user pick a non-1M entry with `/model`, or set `"model": "glm-5.3"` in the project config.
 
-### 4 — Install the config
+### 4 — Give the user the command to run
+
+**You do not run this one.** It takes their key as an argument, and a key you type is a key in the
+transcript. Print it, tell them to substitute their own key from
+[pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys, and wait:
 
 ```bash
-mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --key <THEIR_KEY>
 ```
 
-It arrives on `glm-5.3` — text only; it does not accept images, and `fallbackModel` does not change that (it fires on overload, not on an unsupported request). For another model from the Step 1 list, run Mode B rather than editing by hand — it moves the four fields together and computes the ceiling from the model's live context length, which is the part that is easy to leave behind. The file holds no credential — tell the user it is safe to commit and share.
+Say what it will do, so the command is not a black box: it writes `.claude/settings.json` (config,
+no credential, safe to commit) and `.claude/settings.local.json` (their key, mode 600, added to
+`.gitignore`), installs `claude` if it is missing, checks the key against the router, and runs the
+config checks. It arrives on `glm-5.3` — the strongest TEE tier, and text only: it does not accept
+images, and `fallbackModel` does not change that (it fires on overload, not on an unsupported
+request).
+
+Mention `--key -` if they would rather not have the key in their shell history — it prompts
+instead, with echo off.
+
+If they want a model other than `glm-5.3`, let them install first and then run Mode B. Mode B moves
+the four fields together and takes the ceiling from the model's live context length, which is the
+part that is easy to leave behind.
 
 ### 5 — Hand off
 
-1. Restart Claude Code (close all windows, new terminal, `claude`). The key must be exported in that terminal.
-2. `/status` — Base URL should read `https://router-api.0g.ai`. `[claude-code:unrecognized_model]` is expected and harmless.
-3. Ask the new session to run `echo ok > probe.txt && cat probe.txt`. Under the shipped `acceptEdits` it prompts once and succeeds; if the user switched to `auto`, it should run with no prompt and no "temporarily unavailable".
+1. Restart Claude Code (close all windows, `claude`). **Any terminal** — the key is in a file now,
+   so there is nothing to export and nothing that belongs to one particular shell.
+2. `/status` — Base URL should read `https://router-api.0g.ai`. `[claude-code:unrecognized_model]`
+   is expected and harmless.
+3. Ask the new session to run `echo ok > probe.txt && cat probe.txt`. Under the shipped
+   `acceptEdits` it prompts once and succeeds; if the user switched to `auto`, it should run with
+   no prompt and no "temporarily unavailable".
 
 Done. To change the model later, run this skill again — it will land in Mode B.
 
@@ -172,22 +198,25 @@ Restart, then `/status` to confirm the Model line. The running session keeps the
 
 ## Mode C — Revert to the native Anthropic API
 
-Two steps, and the second is the one that gets missed:
+One step, then restart. This one you may run — it carries no key:
 
 ```bash
-rm .claude/settings.json
-unset ANTHROPIC_AUTH_TOKEN
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --uninstall
 ```
 
-**Deleting the file is not enough.** The key stays in the shell, and Claude Code will keep using it — against `api.anthropic.com`, where it is not valid. The symptom is an authentication failure that looks like a broken account rather than a leftover variable:
+It removes both files and its own block from `.gitignore`, and leaves everything else in `.claude/`
+and in `.gitignore` alone — the user may keep their own files in both.
+
+**There is nothing to unset, and that is new.** This used to be the step everyone missed: the key
+lived in the shell, outlived the config, and Claude Code kept sending it to `api.anthropic.com`
+where it is not valid — an authentication failure that reads as a broken account:
 
 ```
 ⚠ another auth source is set and takes precedence over your claude.ai login
 ```
 
-Shell variables are per-terminal, not per-directory, so this also breaks unrelated projects opened from the same terminal. A fresh terminal works just as well as `unset`.
-
-Then restart. Remove nothing else from `.claude/` — the user may keep their own files there.
+If that message appears now, the key is genuinely being exported somewhere — a shell rc file, most
+likely — and the fix is there, not here.
 
 ## Troubleshooting map
 

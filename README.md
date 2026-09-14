@@ -1,44 +1,48 @@
 # 0G PC Skills
 
-Point **Claude Code** and **Codex** at [0G Private Computer](https://pc.0g.ai) (`router-api.0g.ai`) — TEE-backed inference, OpenAI/Anthropic-compatible. Export your key, download a config file, restart.
+Point **Claude Code** and **Codex** at [0G Private Computer](https://pc.0g.ai) (`router-api.0g.ai`) — TEE-backed inference, OpenAI/Anthropic-compatible. For Claude Code it is one command.
 
-The configs in [`configs/`](configs/) are ordinary files: readable, diffable, and **carrying no credentials**, so a team can commit one and each person brings their own key. Your global `~/.claude/settings.json` is never written — [what is and isn't touched](docs/claude-code.md#what-is-and-isnt-touched).
+The config in [`configs/`](configs/) is an ordinary file: readable, diffable, and **carrying no credentials**, so a team can commit it and each person brings their own key. Your key goes in a second file next to it, mode 600 and git-ignored. Your global `~/.claude/settings.json` is never written — [what is and isn't touched](docs/claude-code.md#what-is-and-isnt-touched).
 
 ## Set up — Claude Code
 
-Needs `claude` already installed (`claude --version`; otherwise `npm install -g @anthropic-ai/claude-code`) and a 0G key from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys.
+Needs a 0G key from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. It installs `claude` for you if you don't have it.
 
 ### User workflow
 
-Two steps. The second one is where it goes wrong.
-
-**① Key and config**, from inside the project you want on 0G. One line: `&&` runs it all in this shell, so the export stays put — which is where Claude Code will look for it.
+**Run this from the project you want on 0G.** It writes into that folder and nowhere else, so where you run it is the one thing that matters.
 
 ```bash
- export ANTHROPIC_AUTH_TOKEN='sk-…' && mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --key sk-…
 ```
 
-Already exported it in this terminal? Drop everything up to the first `&&`.
+The Quick Start card on [pc.0g.ai](https://pc.0g.ai) hands you the same command with your key
+already in it, shortened to `https://pc.0g.ai/install`. Same script, same arguments — copy
+whichever you have in front of you.
 
-**② Restart Claude Code** — in that same terminal.
+Then start Claude Code — **any terminal, no export**:
 
 ```bash
 claude
 ```
 
-Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. The config arrives working, on `glm-5.3`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
+Run `/status` if you want to see it: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. It arrives working, on `glm-5.3`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
 
-**Step ② is the one people miss.** Your key lives only in the shell you exported it in, so launching Claude Code from a different terminal returns a 401 that reads like a bad key. That is the cost of keeping credentials out of every file: every new terminal needs the export again.
+The installer checks your key against the router before claiming success, so a rejected key says so straight away instead of surfacing later as a failure to start. An empty balance is reported as its own case: the key is fine, and nothing about the config needs changing.
+
+Two notes on the key. It lands in `.claude/settings.local.json` — mode 600, added to `.gitignore`, and never in the file you commit. And it is on the command line, so it enters your shell history; `--key -` prompts for it instead, with echo off.
+
+Another project? Run it there too. macOS and Linux; on Windows use WSL or Git Bash.
 
 ### Then what
 
 | You want | Do this |
 |---|---|
 | a different tier, without restarting | `/model` — Opus and Fable are `glm-5.3`, Sonnet and Haiku `0gm-1.0-35b-a3b`. **Never pick a "(1M context)" entry:** [it breaks every Bash, git and network call](docs/claude-code.md#dont-pick-a-1m-context-entry). |
-| a different main model | Edit three fields and restart — [which models qualify, and the context ceiling that travels with them](docs/claude-code.md#switching-the-main-model). |
-| `glm-5.2`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `qwen3.8-flash` | These speak OpenAI only and cannot reach Claude Code directly — [they need the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). |
+| a different main model | Edit four fields and restart — [ask the router which ones qualify, and take the ceiling it gives you](docs/claude-code.md#ask-the-router-dont-trust-a-list). |
+| a model the router only serves in OpenAI format | It cannot reach Claude Code directly — [it needs the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). Which models those are changes; ask the router rather than a list. |
 | to confirm you are really on 0G | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh \| sh` — it reads the effective model, the permission gate and the context ceiling, and says nothing when all three are right. |
-| out | `rm .claude/settings.json`, then `unset ANTHROPIC_AUTH_TOKEN`, then restart — [the second step is not optional](docs/claude-code.md#going-back-to-anthropic). |
+| out | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh \| bash -s claude --uninstall`, then restart. Nothing to unset — [the key went with the file](docs/claude-code.md#going-back-to-anthropic). |
 
 If you plan to edit the file, [what it contains](docs/claude-code.md#what-the-config-file-contains) is worth two minutes first.
 

@@ -27,6 +27,11 @@ want() { # want <名称> <期望 pass|fail> <实际退出码>
     else [ "$3" -ne 0 ] && ok "$1" || no "$1" "exit=0，期望非 0"; fi
 }
 
+# The one file this installer must never touch. Fingerprint it up front and check
+# at the end, so a stray write anywhere in the run is caught rather than assumed away.
+GLOBAL="$HOME/.claude/settings.json"
+GLOBAL_BEFORE="$( [ -f "$GLOBAL" ] && shasum "$GLOBAL" | cut -d" " -f1 || echo absent )"
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 fresh() { rm -rf "$WORK/p"; mkdir -p "$WORK/p"; cd "$WORK/p"; git init -q .; }
@@ -161,6 +166,69 @@ PY
 fresh
 out="$(ZG_BASE_URL="file://$BROKEN" sh "$INSTALL" claude --key "$KEY" 2>&1)"; rc=$?
 [ $rc -ne 0 ] && printf '%s' "$out" | grep -q 'glm-9.9-does-not-exist'     && printf '%s' "$out" | grep -qi 'not a problem with your key'     && ok "缺失的模型被点名，且明确与 key 无关"     || no "缺失的模型被点名，且明确与 key 无关" "exit=$rc"
+
+# ----------------------------------------------------------------------- #81
+echo "#81 — 备份与恢复"
+
+# 项目里原本就有一份 settings.json（用户自己的 hooks / permissions）
+fresh
+mkdir -p .claude
+printf '{\n  "permissions": {"defaultMode": "plan"},\n  "statusLine": {"type": "command", "command": "echo mine"}\n}\n' > .claude/settings.json
+cp .claude/settings.json "$WORK/orig-settings.json"
+
+sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1;         want "有已存在配置时安装退出 0" pass $?
+diff -q "$WORK/orig-settings.json" .claude/settings.json.0g-backup >/dev/null 2>&1 \
+    && ok "备份与原件逐字节相同" || no "备份与原件逐字节相同"
+grep -q 'statusLine' .claude/settings.json 2>/dev/null \
+    && no "settings.json 已被 0G 配置取代" || ok "settings.json 已被 0G 配置取代"
+grep -q '0g-backup' .gitignore 2>/dev/null \
+    && ok ".gitignore 覆盖备份文件" || no ".gitignore 覆盖备份文件"
+git status --porcelain --untracked-files=all | grep -q '0g-backup' \
+    && no "git 看不见备份" || ok "git 看不见备份"
+
+# 核心：二次安装时，就位的那份已经是 0G 配置了。若拿它去盖备份，
+# 用户原件就此永久消失，而且不会有任何报错。
+sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1;         want "二次安装退出 0" pass $?
+diff -q "$WORK/orig-settings.json" .claude/settings.json.0g-backup >/dev/null 2>&1 \
+    && ok "二次安装未覆盖备份（原件仍在）" || no "二次安装未覆盖备份（原件仍在）"
+
+sh "$INSTALL" claude --uninstall >/dev/null 2>&1;          want "卸载退出 0" pass $?
+diff -q "$WORK/orig-settings.json" .claude/settings.json >/dev/null 2>&1 \
+    && ok "settings.json 已恢复成原件" || no "settings.json 已恢复成原件"
+[ ! -e .claude/settings.json.0g-backup ] \
+    && ok "备份已清理" || no "备份已清理"
+grep -q '0g-backup' .gitignore 2>/dev/null \
+    && no "卸载后 .gitignore 标记块已清" || ok "卸载后 .gitignore 标记块已清"
+
+# 装进去时是合并，出来时也必须是合并
+echo "#81 — 卸载不吞掉 local 里用户自己的东西"
+fresh
+mkdir -p .claude
+printf '{\n  "permissions": {"defaultMode": "plan"},\n  "env": {"MY_OWN": "keepme"}\n}\n' > .claude/settings.local.json
+sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1
+sh "$INSTALL" claude --uninstall >/dev/null 2>&1
+[ -e .claude/settings.local.json ] \
+    && ok "local 文件仍在" || no "local 文件仍在"
+python3 - <<'PYX' && ok "用户键保留，凭据已移除" || no "用户键保留，凭据已移除"
+import json, sys
+d = json.load(open(".claude/settings.local.json"))
+sys.exit(0 if d.get("permissions", {}).get("defaultMode") == "plan"
+         and d.get("env", {}).get("MY_OWN") == "keepme"
+         and "ANTHROPIC_AUTH_TOKEN" not in d.get("env", {}) else 1)
+PYX
+
+# 原本一无所有：装完再卸，应当不留痕迹
+echo "#81 — 无前置状态时装后卸不留痕"
+fresh
+sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1
+sh "$INSTALL" claude --uninstall >/dev/null 2>&1
+[ ! -e .claude ] && ok ".claude 目录已消失" || no ".claude 目录已消失" "$(ls -a .claude 2>/dev/null | tr '\n' ' ')"
+
+echo "#81 — 全局配置全程未被触碰"
+GLOBAL_AFTER="$( [ -f "$GLOBAL" ] && shasum "$GLOBAL" | cut -d' ' -f1 || echo absent )"
+[ "$GLOBAL_BEFORE" = "$GLOBAL_AFTER" ] \
+    && ok "~/.claude/settings.json 逐字节未变" \
+    || no "~/.claude/settings.json 逐字节未变" "before=$GLOBAL_BEFORE after=$GLOBAL_AFTER"
 
 # ------------------------------------------------------------------------- 
 echo

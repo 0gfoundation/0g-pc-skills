@@ -1,7 +1,11 @@
 #!/bin/sh
 # install.sh — put Claude Code on 0G Private Computer, in one command.
 #
-#   curl -fsSL https://pc.0g.ai/install | bash -s claude --key sk-…
+#   curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh \
+#     | bash -s claude --key sk-…
+#
+# The pc.0g.ai Quick Start card serves this same file from https://pc.0g.ai/install with the
+# user's key filled in. Both are this script; see docs/install-contract.md.
 #
 # Writes two files into the current project and nothing else. Your global
 # ~/.claude/settings.json is never touched.

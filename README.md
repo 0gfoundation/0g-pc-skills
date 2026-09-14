@@ -16,6 +16,10 @@ Needs a 0G key from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys. It 
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --key sk-…
 ```
 
+The Quick Start card on [pc.0g.ai](https://pc.0g.ai) hands you the same command with your key
+already in it, shortened to `https://pc.0g.ai/install`. Same script, same arguments — copy
+whichever you have in front of you.
+
 Then start Claude Code — **any terminal, no export**:
 
 ```bash

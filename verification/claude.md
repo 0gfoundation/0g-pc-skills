@@ -128,11 +128,23 @@ print('全局三键仍未变:', all(a.get(k)==b.get(k) for k in ['env','modelOve
 ## 6. 附加：Skill 走法（可选）
 
 ```bash
-mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-claude/SKILL.md -o ~/.claude/skills/0g-pc-model-config-claude/SKILL.md
+for s in setup switch-model uninstall; do mkdir -p ~/.claude/skills/0g-pc-$s && curl -fsSL \
+  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-$s/SKILL.md \
+  -o ~/.claude/skills/0g-pc-$s/SKILL.md; done
+
+# 旧 Skill 若在，必须先清掉：它与新三条抢同一批请求，且教的流程已作废
+rm -rf ~/.claude/skills/0g-pc-model-config-claude
 ```
 
 **skill 发现无需重启** —— curl 落盘后当前会话即时注册（实测）。若当前会话没出现，再重开终端确认。
-说「接入 0G PC」，它应当引导你走完与第 1–3 步等价的流程。
+
+逐条走：
+
+- 说「接入 0G PC」→ 应命中 `/0g-pc-setup`，列出模型（含 TEE 三档），**停下来等你选**，然后交给你安装命令而不是自己跑
+- 说「换个模型」→ 应命中 `/0g-pc-switch-model`，列表后停住；选定后四个字段一起改，`modelOverrides` 不动
+- 说「不用 0G 了」→ 应命中 `/0g-pc-uninstall`，先说明会恢复什么、删掉什么、key 会没，等确认后才动手
+
+三处「停下来」都必须是真的停。只打印列表就继续往下做，算**不通过** —— 这正是旧 Skill 的病灶。
 
 结果：____________
 
@@ -160,7 +172,9 @@ python3 tests/triggers.py        # 无 key、不联网；PASSED 且退出码 0 �
 
 ### 已知且在案的重叠
 
-旧 `0g-pc-model-config-claude` 与新三条共享 **7 个**触发短语。这是拆分过程中必然经过的一段，由 #86 撤掉旧 Skill 收尾——脚本报告它但不据此判失败。
+旧 `0g-pc-model-config-claude` 已由 #86 从仓库撤掉，脚本中相应的 out-of-scope 报告随之消失。
+
+**但仓库删除不等于用户机器上消失。**已装过旧 Skill 的人，`~/.claude/skills/` 下那份仍在，会与新三条抢同一批请求，且教的是已作废的 `export ANTHROPIC_AUTH_TOKEN` 流程。验证时务必先 `rm -rf ~/.claude/skills/0g-pc-model-config-claude`，否则第 6 节的路由结果不可信。
 
 ## 7. 结论
 
@@ -169,11 +183,12 @@ python3 tests/triggers.py        # 无 key、不联网；PASSED 且退出码 0 �
 
 ## 5. Skill 的模型清单（#65 起）
 
-交互式 Skill 只呈现直连能到的模型，Path B 不出现。
+`/0g-pc-setup` 与 `/0g-pc-switch-model` 只呈现直连能到的模型，Path B 不出现。
 
 ```bash
 # a) 文档里不得有任何桥的痕迹
-grep -niE 'litellm|4000|bridge|zg_patch|ZG_API_KEY|uvx' "$REPO/skills/0g-pc-model-config-claude/SKILL.md"
+grep -niE 'litellm|4000|bridge|zg_patch|ZG_API_KEY|uvx' \
+  "$REPO"/skills/0g-pc-{setup,switch-model,uninstall}/SKILL.md
 echo "a) 期望 1（无命中），实得 $?"
 
 # b) Skill 呈现的清单 == live 过滤结果

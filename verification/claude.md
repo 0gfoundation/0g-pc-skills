@@ -136,6 +136,32 @@ mkdir -p ~/.claude/skills/0g-pc-model-config-claude && curl -fsSL https://raw.gi
 
 结果：____________
 
+## 6b. 触发词互斥（#84）
+
+三个 Skill 共用 `0g-pc-` 前缀、讲同一件事，靠 `description` 里的触发词分流。写重叠了就会挑错，而代价不对称：错到 `switch-model` 最多白问一轮，错到 `uninstall` 会走上删配置那条路。
+
+```bash
+python3 tests/triggers.py        # 无 key、不联网；PASSED 且退出码 0 为通过
+```
+
+它检查三件事：三个 Skill 两两之间没有互为子串的触发短语；12 条自然语言输入每条只命中预期的那一个；一条 Codex 的请求不会落到 Claude 的 Skill 上。
+
+### 「0G 配置不工作」不路由到任何 Skill —— 定夺与理由
+
+排错类输入（`0G 配置不工作`、`0G 用不了了`、`0G is broken`）**故意不被任何 Skill 命中**。
+
+理由来自架构而不是口味：`/0g-pc-setup` 有一条前置检查，配置已存在时它拒绝启动。把排错路由给它，必然走进「已经装了，去用 switch 或 uninstall 吧」的死胡同。要让它不拒绝，就得按磁盘状态决定干哪件事——那正是这次拆分要消除的模式推断。
+
+排错的入口是 `check-0g.sh` 和 `docs/claude-code.md`，三个 Skill 各自的 troubleshooting 表只管自己那件事。
+
+### 跨客户端：子串消不掉，靠特异性
+
+`set up 0G PC` 是 `set up 0G PC in Codex` 的子串，任何短语表都消不掉这个包含关系。所以两处一起解决：`0g-pc-setup` 的 description 明写「Claude Code only，提到 Codex 的请求属于 `0g-pc-model-config-codex`」，检查器按最长匹配判定归属。
+
+### 已知且在案的重叠
+
+旧 `0g-pc-model-config-claude` 与新三条共享 **7 个**触发短语。这是拆分过程中必然经过的一段，由 #86 撤掉旧 Skill 收尾——脚本报告它但不据此判失败。
+
 ## 7. 结论
 
 - [ ] 通过 —— 第 3.2 步符合预期，第 2 步 a–d 全过

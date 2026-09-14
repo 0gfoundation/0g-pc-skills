@@ -1,7 +1,7 @@
 ---
 name: 0g-pc-setup
 argument-hint: ""
-description: Put a project on 0G Private Computer (pc.0g.ai, router-api.0g.ai) as Claude Code's model backend — TEE-backed inference reached through an Anthropic-compatible router. Use when the user wants to set up, connect or start using 0G in a project for the first time. Triggers include "接入 0G", "配置 0G", "把 Claude Code 接到 0G", "用 0G 的模型", "0G 怎么配", "set up 0G PC", "connect Claude Code to 0G", "put this project on 0G", "use 0G models in Claude Code". Not for changing models afterwards and not for turning 0G off.
+description: Put a project on 0G Private Computer (pc.0g.ai, router-api.0g.ai) as Claude Code's model backend — TEE-backed inference reached through an Anthropic-compatible router. Use when the user wants to set up, connect or start using 0G in a project for the first time. Triggers include "接入 0G", "配置 0G", "把 Claude Code 接到 0G", "用 0G 的模型", "0G 怎么配", "set up 0G PC", "connect Claude Code to 0G", "put this project on 0G", "use 0G models in Claude Code". Claude Code only: a request that mentions Codex belongs to 0g-pc-model-config-codex, which reaches 0G a different way. Not for changing models afterwards and not for turning 0G off.
 ---
 
 # Put this project on 0G

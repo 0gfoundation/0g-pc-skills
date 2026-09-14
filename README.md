@@ -54,21 +54,17 @@ The leading space keeps them out of your shell history. They last as long as the
 
 ### User workflow
 
-Three steps. The third one is where it goes wrong.
+Two steps. The second one is where it goes wrong.
 
-**① Your key**, in the terminal you are about to work in — skip if you exported it above.
-
-```bash
- export ANTHROPIC_AUTH_TOKEN='sk-…'
-```
-
-**② The config**, from inside the project you want on 0G.
+**① Key and config**, from inside the project you want on 0G. One line: `&&` runs it all in this shell, so the export stays put — which is where Claude Code will look for it.
 
 ```bash
-mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
+ export ANTHROPIC_AUTH_TOKEN='sk-…' && mkdir -p .claude && curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/claude/settings.json -o .claude/settings.json
 ```
 
-**③ Restart Claude Code** — in that same terminal.
+Already exported it in this terminal? Drop everything up to the first `&&`.
+
+**② Restart Claude Code** — in that same terminal.
 
 ```bash
 claude
@@ -76,7 +72,7 @@ claude
 
 Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. The config arrives working, on `glm-5.2`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
 
-**Step ③ is the one people miss.** Your key lives only in the shell you exported it in, so launching Claude Code from a different terminal returns a 401 that reads like a bad key. That is the cost of keeping credentials out of every file: every new terminal needs the export again.
+**Step ② is the one people miss.** Your key lives only in the shell you exported it in, so launching Claude Code from a different terminal returns a 401 that reads like a bad key. That is the cost of keeping credentials out of every file: every new terminal needs the export again.
 
 ### Then what
 

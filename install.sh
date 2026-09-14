@@ -1,0 +1,239 @@
+#!/bin/sh
+# install.sh — put Claude Code on 0G Private Computer, in one command.
+#
+#   curl -fsSL https://pc.0g.ai/install | bash -s claude --key sk-…
+#
+# Writes two files into the current project and nothing else. Your global
+# ~/.claude/settings.json is never touched.
+set -eu
+
+BASE_URL="${ZG_BASE_URL:-https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main}"
+ROUTER="${ZG_ROUTER:-https://router-api.0g.ai}"
+
+SETTINGS=".claude/settings.json"
+LOCAL=".claude/settings.local.json"
+GITIGNORE=".gitignore"
+MARK_HEAD="# >>> 0g-pc install >>>"
+MARK_FOOT="# <<< 0g-pc install <<<"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+
+usage() {
+    cat <<'EOF'
+Put Claude Code on 0G Private Computer.
+
+  install.sh claude --key <YOUR_API_KEY>    install into the current project
+  install.sh claude --key -                 read the key from the terminal instead,
+                                            keeping it out of your shell history
+  install.sh claude --uninstall             remove it again
+  install.sh --help
+
+Get a key at https://pc.0g.ai → Dashboard → API Keys.
+
+Writes .claude/settings.json (no credentials, safe to commit) and
+.claude/settings.local.json (your key, mode 600, added to .gitignore).
+Your global ~/.claude/settings.json is never written.
+EOF
+}
+
+# ---------------------------------------------------------------- arguments
+
+CLIENT=""
+KEY=""
+MODE="install"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help)   usage; exit 0 ;;
+        --uninstall) MODE="uninstall" ;;
+        --key)
+            [ $# -ge 2 ] || die "--key needs a value (or - to be prompted). Try --help."
+            KEY="$2"; shift ;;
+        --key=*)     KEY="${1#--key=}" ;;
+        -*)          die "unknown option: $1. Try --help." ;;
+        *)
+            [ -z "$CLIENT" ] || die "unexpected argument: $1. Try --help."
+            CLIENT="$1" ;;
+    esac
+    shift
+done
+
+[ -n "$CLIENT" ] || { usage >&2; die "
+which client? Only 'claude' is supported today."; }
+
+case "$CLIENT" in
+    claude) ;;
+    codex)  die "codex is not supported by this installer yet — it needs a long-running
+LiteLLM bridge, which one command cannot leave behind. See
+https://github.com/0gfoundation/0g-pc-skills#set-up--codex" ;;
+    gemini|curl) die "$CLIENT is not supported yet. Only 'claude' is." ;;
+    *)      die "unknown client: $CLIENT. Only 'claude' is supported today." ;;
+esac
+
+have() { command -v "$1" >/dev/null 2>&1; }
+have python3 || die "python3 is required and was not found."
+
+# ------------------------------------------------------------- .gitignore
+
+gitignore_add() {
+    if [ -f "$GITIGNORE" ] && grep -qF "$MARK_HEAD" "$GITIGNORE"; then
+        return 0
+    fi
+    [ ! -f "$GITIGNORE" ] || [ -z "$(tail -c 1 "$GITIGNORE")" ] || printf '\n' >> "$GITIGNORE"
+    printf '%s\n%s\n%s\n' "$MARK_HEAD" "$LOCAL" "$MARK_FOOT" >> "$GITIGNORE"
+}
+
+gitignore_remove() {
+    [ -f "$GITIGNORE" ] || return 0
+    python3 - "$GITIGNORE" "$MARK_HEAD" "$MARK_FOOT" <<'PY'
+import pathlib, sys
+p, head, foot = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+out, skipping = [], False
+for line in p.read_text().splitlines(True):
+    if line.strip() == head:
+        skipping = True
+    elif skipping:
+        if line.strip() == foot:
+            skipping = False
+    else:
+        out.append(line)
+text = "".join(out)
+if text.strip():
+    p.write_text(text)
+else:
+    p.unlink()
+PY
+}
+
+# --------------------------------------------------------------- uninstall
+
+if [ "$MODE" = uninstall ]; then
+    removed=0
+    for f in "$LOCAL" "$SETTINGS"; do
+        if [ -e "$f" ]; then rm -f "$f"; removed=$((removed + 1)); fi
+    done
+    gitignore_remove
+    [ ! -d .claude ] || rmdir .claude 2>/dev/null || true
+    if [ "$removed" -eq 0 ]; then
+        note "nothing to remove here — no 0G config in this project."
+    else
+        note "removed. Your key went with the file, so there is nothing to unset:
+start Claude Code in a new terminal and it is back on the Anthropic API."
+    fi
+    exit 0
+fi
+
+# --------------------------------------------------------------------- key
+
+if [ "$KEY" = "-" ]; then
+    if [ -r /dev/tty ]; then
+        printf 'Paste your 0G API key (not shown): ' > /dev/tty
+        stty -echo < /dev/tty 2>/dev/null || true
+        read -r KEY < /dev/tty || true
+        stty echo < /dev/tty 2>/dev/null || true
+        printf '\n' > /dev/tty
+    else
+        read -r KEY || true
+    fi
+fi
+
+[ -n "$KEY" ] || die "no key. Pass --key sk-… , or --key - to be prompted for it.
+Get one at https://pc.0g.ai → Dashboard → API Keys."
+
+case "$KEY" in
+    sk-*) ;;
+    *) die "that does not look like a 0G key — they start with 'sk-'." ;;
+esac
+
+# ---------------------------------------------------------------- preflight
+
+# .gitignore does nothing for a file git already tracks, so refuse to write a key
+# into one. This is the case where the usual fix looks applied and is not.
+if have git && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if git ls-files --error-unmatch "$LOCAL" >/dev/null 2>&1; then
+        die "$LOCAL is tracked by git. Writing your key into it would put it one
+commit from being pushed, and .gitignore does not help with a file git already
+tracks. Run this first:
+
+  git rm --cached $LOCAL"
+    fi
+fi
+
+if ! have claude; then
+    have npm || die "Claude Code is not installed and npm was not found either.
+Install Node.js, then run: npm install -g @anthropic-ai/claude-code"
+    note "Claude Code not found — installing it…"
+    npm install -g @anthropic-ai/claude-code >&2 || die "npm could not install Claude Code."
+    have claude || die "npm finished but 'claude' is still not on PATH."
+fi
+
+# ------------------------------------------------------------------- write
+
+mkdir -p .claude
+
+tmp_cfg="$(mktemp)"
+trap 'rm -f "$tmp_cfg"' EXIT INT TERM
+curl -fsSL "$BASE_URL/configs/claude/settings.json" -o "$tmp_cfg" \
+    || die "could not fetch the config from $BASE_URL — check your connection."
+python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$tmp_cfg" \
+    || die "the config fetched from $BASE_URL is not valid JSON."
+cat "$tmp_cfg" > "$SETTINGS"
+
+# The key goes in the local file, which is merged rather than replaced: a project
+# may already keep personal settings there.
+KEY="$KEY" python3 - "$LOCAL" <<'PY'
+import json, os, pathlib
+p = pathlib.Path(os.sys.argv[1])
+try:
+    doc = json.loads(p.read_text())
+    if not isinstance(doc, dict):
+        doc = {}
+except Exception:
+    doc = {}
+doc.setdefault("env", {})["ANTHROPIC_AUTH_TOKEN"] = os.environ["KEY"]
+p.write_text(json.dumps(doc, indent=2) + "\n")
+PY
+chmod 600 "$LOCAL"
+
+gitignore_add
+
+# ---------------------------------------------------------------- validate
+
+note "checking the key against the router…"
+status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
+    -X POST "$ROUTER/v1/messages" \
+    -H "Authorization: Bearer $KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -H "content-type: application/json" \
+    -d '{"model":"glm-5.3","max_tokens":1,"messages":[{"role":"user","content":"."}]}' \
+    || echo 000)"
+
+case "$status" in
+    200) ;;
+    401) die "the config is written, but the router rejected this key (401).
+Check it at https://pc.0g.ai → Dashboard → API Keys, then run this again." ;;
+    402) die "the config is written, and the key is valid — but the account has no
+balance (402). Top up at https://pc.0g.ai/dashboard/overview and you are done;
+nothing here needs changing." ;;
+    000) die "the config is written, but the router could not be reached to check
+the key. Verify with: curl -s $ROUTER/v1/models" ;;
+    *)   die "the config is written, but the router answered $status when checking
+the key. Try again, or see https://pc.0g.ai/dashboard/overview" ;;
+esac
+
+# -------------------------------------------------------------- self-check
+
+tmp_chk="$(mktemp)"
+trap 'rm -f "$tmp_cfg" "$tmp_chk"' EXIT INT TERM
+if curl -fsSL "$BASE_URL/check-0g.sh" -o "$tmp_chk" 2>/dev/null; then
+    sh "$tmp_chk" || die "the config is written and the key works, but the checks
+above found a problem. Fix it and run this again."
+fi
+
+note "done. Claude Code is on 0G in this project.
+Start it in any terminal — no export needed:
+
+  claude
+
+Undo with: install.sh claude --uninstall"

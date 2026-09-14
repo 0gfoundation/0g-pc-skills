@@ -2,11 +2,19 @@
 # check-0g.sh — sanity-check a 0G PC config for Claude Code.
 # Run from the project that holds .claude/settings.json. Silent when healthy.
 exec python3 - "$@" <<'PY'
-import json, os, pathlib, sys, urllib.request
+import json, os, pathlib, subprocess, sys, urllib.request
 
 REASONING = {"glm-5.2", "glm-5.3", "glm-5", "kimi-k3", "deepseek-v4-pro", "minimax-m3"}
 # These are main-model candidates. The gate must not be one of them — it is checked below.
+CREDENTIALS = {"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+LOCAL = ".claude/settings.local.json"
 problems = []
+
+def git(*args):
+    try:
+        return subprocess.run(("git",) + args, capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
 
 def load(p):
     try:
@@ -19,13 +27,47 @@ if not cfg:
     sys.exit("no .claude/settings.json here — run this from the project you configured")
 env = cfg.get("env", {})
 
-# .claude/settings.local.json is loaded after project settings and wins. A config that
-# "does not apply" is usually this, and nothing else reports it.
-shadow = load(".claude/settings.local.json")
-overlap = [k for k in ("env", "modelOverrides", "permissions") if k in shadow]
-if overlap:
-    problems.append(f'.claude/settings.local.json also sets {", ".join(overlap)} and takes precedence\n'
-                    '  over the project settings checked here — Claude Code loads local after project.')
+# .claude/settings.local.json is where the key lives, so credentials there are expected and
+# not reported. Anything else in it shadows the project settings checked below — local is
+# loaded after project and wins — and a config that "does not apply" is usually this.
+local_path = pathlib.Path(LOCAL)
+shadow = load(LOCAL)
+shadowing = [k for k in ("modelOverrides", "permissions") if k in shadow]
+shadowing += [f"env.{k}" for k in sorted(set(shadow.get("env", {})) - CREDENTIALS)]
+if shadowing:
+    problems.append(f'{LOCAL} also sets {", ".join(shadowing)} and takes precedence over the\n'
+                    '  project settings checked here — Claude Code loads local after project.\n'
+                    '  Credentials belong there; configuration does not.')
+
+# 0 — the key: present, private, and out of reach of git
+key_in_file = any(shadow.get("env", {}).get(k) for k in CREDENTIALS)
+key_in_shell = any(os.environ.get(k) for k in CREDENTIALS)
+
+if not local_path.exists():
+    if not key_in_shell:
+        problems.append(f'no credential anywhere: {LOCAL} does not exist and ANTHROPIC_AUTH_TOKEN\n'
+                        '  is not exported either. Claude Code will fall back to your Anthropic login\n'
+                        '  and send it to the 0G router, which reads as a broken account.')
+elif not key_in_file:
+    problems.append(f'{LOCAL} exists but carries no credential. Either put the key there or\n'
+                    '  delete the file — an empty one only shadows the project settings.')
+
+if local_path.exists():
+    mode = local_path.stat().st_mode & 0o777
+    if mode & 0o077:
+        problems.append(f'{LOCAL} is mode {mode:03o} — readable by other accounts on this machine.\n'
+                        f'  It holds your key. Fix: chmod 600 {LOCAL}')
+
+    # .gitignore does nothing for a file git already tracks, so check tracking first —
+    # that is the case where the key is one commit away and the usual fix looks applied.
+    if (r := git("rev-parse", "--is-inside-work-tree")) and r.returncode == 0:
+        if (t := git("ls-files", "--error-unmatch", LOCAL)) and t.returncode == 0:
+            problems.append(f'{LOCAL} is TRACKED BY GIT — your key is one commit from being pushed.\n'
+                            '  Adding it to .gitignore will not help; git ignores nothing it already tracks.\n'
+                            f'  Fix: git rm --cached {LOCAL}   (then confirm it is in .gitignore)')
+        elif (g := git("check-ignore", "-q", LOCAL)) and g.returncode != 0:
+            problems.append(f'{LOCAL} is not ignored by git — the next `git add -A` picks up your key.\n'
+                            f'  Fix: echo {LOCAL} >> .gitignore')
 
 # 1 — a [1m] session model poisons the classifier derived from the Sonnet tier
 for label, path in (("project local", ".claude/settings.local.json"),

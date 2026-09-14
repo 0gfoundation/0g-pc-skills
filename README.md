@@ -86,7 +86,7 @@ Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is
 | a different main model | Edit three fields and restart — [which models qualify, and the context ceiling that travels with them](docs/claude-code.md#switching-the-main-model). |
 | `glm-5.2`, `kimi-k3`, `qwen3.8-max`, `minimax-m3`, `gpt-5.6-*`, `qwen3.8-flash` | These speak OpenAI only and cannot reach Claude Code directly — [they need the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). |
 | to confirm you are really on 0G | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh \| sh` — it reads the effective model, the permission gate and the context ceiling, and says nothing when all three are right. |
-| out | `rm .claude/settings.json` and restart. Nothing else to undo. |
+| out | `rm .claude/settings.json`, then `unset ANTHROPIC_AUTH_TOKEN`, then restart — [the second step is not optional](docs/claude-code.md#going-back-to-anthropic). |
 
 If you plan to edit the file, [what it contains](docs/claude-code.md#what-the-config-file-contains) is worth two minutes first.
 

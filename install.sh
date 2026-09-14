@@ -184,6 +184,40 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$tmp_cfg" \
     || die "the config fetched from $BASE_URL is not valid JSON."
 cat "$tmp_cfg" > "$SETTINGS"
 
+# The model to check the key with, and the context ceiling, both come from the router rather
+# than from a number typed into this script. A model name written here would outlive its
+# presence on the router and turn every install into a report that the user's key was refused.
+if ! MODEL="$(python3 - "$SETTINGS" "$ROUTER" <<'PY'
+import json, pathlib, sys, urllib.request
+p = pathlib.Path(sys.argv[1])
+cfg = json.loads(p.read_text())
+model = (cfg.get("env") or {}).get("ANTHROPIC_MODEL")
+if not model:
+    sys.exit("the config carries no ANTHROPIC_MODEL — nothing to install.")
+try:
+    with urllib.request.urlopen(sys.argv[2] + "/v1/models", timeout=20) as r:
+        live = {m["id"]: m for m in json.load(r)["data"]}
+except Exception:
+    live = {}                      # offline: keep the shipped ceiling and let the key check report
+if live:
+    m = live.get(model)
+    if m is None:
+        sys.exit(f"the config asks for {model}, which the router does not serve right now.\n"
+                 f"This is not a problem with your key. See {sys.argv[2]}/v1/models")
+    if "anthropic" not in (m.get("supported_formats") or []):
+        sys.exit(f"the router serves {model} in "
+                 f"{'+'.join(m.get('supported_formats') or ['no'])} format only, which a direct\n"
+                 "config cannot reach. This is not a problem with your key.")
+    ctx = m.get("context_length")
+    if ctx:
+        cfg["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"] = str(ctx * 15 // 16)
+        p.write_text(json.dumps(cfg, indent=2) + "\n")
+print(model)
+PY
+)"; then
+    die "the config could not be prepared."
+fi
+
 # The key goes in the local file, which is merged rather than replaced: a project
 # may already keep personal settings there.
 KEY="$KEY" python3 - "$LOCAL" <<'PY'
@@ -210,7 +244,7 @@ status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 \
     -H "Authorization: Bearer $KEY" \
     -H "anthropic-version: 2023-06-01" \
     -H "content-type: application/json" \
-    -d '{"model":"glm-5.3","max_tokens":1,"messages":[{"role":"user","content":"."}]}' \
+    -d "{\"model\":\"$MODEL\",\"max_tokens\":1,\"messages\":[{\"role\":\"user\",\"content\":\".\"}]}" \
     || echo 000)"
 
 case "$status" in

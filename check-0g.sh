@@ -4,8 +4,18 @@
 exec python3 - "$@" <<'PY'
 import json, os, pathlib, subprocess, sys, urllib.request
 
+# Main-model candidates that are slow enough to break the gate. This list is a heuristic and
+# will not know about a reasoning model released after it was written.
+#
+# It cannot be derived from /v1/models: there is no reasoning flag there, and the obvious
+# substitutes do not work. `reasoning_effort` appears on the gate model 0gm-1.0-35b-a3b as well
+# as on every model below, and kimi-k3 — which does break the gate — advertises no thinking
+# parameter at all. A check built on those fields would fail in both directions. Checked
+# 2026-09-14; re-check before trying again.
+#
+# The structural check below (gate vs the Haiku tier) does not depend on this list and catches
+# the case where someone points the gate at something new.
 REASONING = {"glm-5.2", "glm-5.3", "glm-5", "kimi-k3", "deepseek-v4-pro", "minimax-m3"}
-# These are main-model candidates. The gate must not be one of them — it is checked below.
 CREDENTIALS = {"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
 LOCAL = ".claude/settings.local.json"
 problems = []
@@ -91,6 +101,15 @@ if not gate:
 elif gate in REASONING:
     problems.append(f'the gate modelOverrides["claude-sonnet-5"] points at "{gate}", a reasoning model.\n'
                     '  Every gated action becomes a long reasoning pass that times out. Use 0gm-1.0-35b-a3b.')
+else:
+    # Field-free backstop for reasoning models this script has never heard of. Both slots are
+    # meant to hold the same fast model, so a mismatch is worth a look even when it is deliberate.
+    haiku = env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+    if haiku and gate != haiku:
+        problems.append(f'the gate modelOverrides["claude-sonnet-5"] is "{gate}" while the Haiku tier is\n'
+                        f'  "{haiku}". Both are meant to be the same fast model; if "{gate}" turns out to be a\n'
+                        '  reasoning model, every Bash, git and network call times out under auto mode while\n'
+                        '  chat keeps working. Point both at the fast model, or ignore this if you know better.')
 
 # 3 — base URL
 base = env.get("ANTHROPIC_BASE_URL", "")

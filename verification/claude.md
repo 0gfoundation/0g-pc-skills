@@ -50,8 +50,17 @@ echo "期望 0，实得 $?"
 ## 2. 写入后检查
 
 ```bash
-# a) 与仓库副本逐字节一致
-cmp .claude/settings.json "$REPO/configs/claude/settings.json" ; echo "a) 期望 0，实得 $?"
+# a) 除上下文上限外与仓库副本一致；上限由安装器按 live 重算，故单独校验
+python3 -c "
+import json,urllib.request
+K='CLAUDE_CODE_MAX_CONTEXT_TOKENS'
+a=json.load(open('.claude/settings.json')); b=json.load(open('$REPO/configs/claude/settings.json'))
+live={m['id']:m.get('context_length') for m in json.load(urllib.request.urlopen('https://router-api.0g.ai/v1/models'))['data']}
+ra={**a,'env':{k:v for k,v in a['env'].items() if k!=K}}
+rb={**b,'env':{k:v for k,v in b['env'].items() if k!=K}}
+want=live[a['env']['ANTHROPIC_MODEL']]*15//16
+print('a1)', '通过' if ra==rb else '失败：除上限外应逐字段一致')
+print('a2)', f'通过（上限 {a[\"env\"][K]}）' if int(a['env'][K])==want else f'失败：上限 {a[\"env\"][K]}，应为 {want}')"
 
 # b) 配置中无凭据 —— 这是本次架构调整的核心
 grep -c 'sk-\|AUTH_TOKEN' .claude/settings.json ; echo "b) 期望 0"

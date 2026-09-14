@@ -6,9 +6,13 @@ Config is read at launch, so nothing changes in a session that was already open.
 
 ## What is and isn't touched
 
-Your global `~/.claude/settings.json` — hooks, plugins, status line, your `/model` choice — is **never written**. The config goes to `.claude/settings.json` in one project, and deleting that file undoes everything.
+Your global `~/.claude/settings.json` — hooks, plugins, status line, your `/model` choice — is **never written**. Two files land in the project you ran the installer from, and nothing outside it changes.
 
-It carries **no credentials**. The key lives in `ANTHROPIC_AUTH_TOKEN` in your shell and nowhere else, which is what makes the file safe to read, diff, and commit — a team shares one config and each person brings their own key. Shell variables belong to the terminal, not the directory, so every new terminal needs the export again. That is the cost of keeping the key out of every file.
+`.claude/settings.json` holds the configuration and **no credentials**, which is what makes it safe to read, diff, and commit: a team shares one config and each person brings their own key.
+
+`.claude/settings.local.json` holds your key and nothing else. Claude Code loads it after the project settings, so it is the natural home for something personal. It is created mode 600 and added to `.gitignore`; the installer refuses to write it at all if git is already tracking that path, because `.gitignore` does nothing for a file git already tracks and the key would be one commit from being pushed.
+
+The key being in a file rather than a shell variable is what makes a **new terminal work**. Nothing to export, nothing to remember. It costs you a credential on disk in the project folder — 600 and git-ignored, but on disk.
 
 Codex differs: it has no per-project configuration, so [that setup cannot be confined to a folder](codex.md).
 
@@ -33,7 +37,7 @@ Codex differs: it has no per-project configuration, so [that setup cannot be con
 }
 ```
 
-Every tier points at a 0G model, so whichever one Claude Code reaches for, the request stays on 0G. No credential appears anywhere in the file — that comes from `ANTHROPIC_AUTH_TOKEN` in your shell.
+Every tier points at a 0G model, so whichever one Claude Code reaches for, the request stays on 0G. No credential appears anywhere in this file — that lives in `.claude/settings.local.json` beside it.
 
 ### The main model is text only
 
@@ -129,28 +133,31 @@ Your `/model` choice is remembered in `~/.claude/settings.json`, so this survive
 mkdir -p ~/.0g-litellm
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/litellm-config.yaml -o ~/.0g-litellm/litellm-config.yaml
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/configs/codex/zg_patch.py -o ~/.0g-litellm/zg_patch.py
-cd ~/.0g-litellm && export ZG_API_KEY="$ANTHROPIC_AUTH_TOKEN"
+cd ~/.0g-litellm && export ZG_API_KEY='sk-…'          # your 0G key, pasted
 uvx --from 'litellm[proxy]==1.98.0' litellm --config litellm-config.yaml --port 4000
 ```
 
-Then two changes in `.claude/settings.json`: `ANTHROPIC_BASE_URL` to `http://127.0.0.1:4000`, and the three model fields to the model you want. The bridge does not authenticate, so in this mode `ANTHROPIC_AUTH_TOKEN` can be any string — the real key is the one `ZG_API_KEY` carries into the bridge. Or say "switch to glm-5.3" to the skill and let it do all of it.
+Paste the key rather than reaching for a shell variable: since the installer put it in a file, there is no `ANTHROPIC_AUTH_TOKEN` in your environment to borrow. `cat .claude/settings.local.json` if you need to see it.
+
+Then two changes in `.claude/settings.json`: `ANTHROPIC_BASE_URL` to `http://127.0.0.1:4000`, and the three model fields to the model you want. The bridge does not authenticate, so the credential in `settings.local.json` can be any string in this mode — the real key is the one `ZG_API_KEY` carries into the bridge.
 
 ## Going back to Anthropic
 
-Two steps, and the second is the one that gets missed:
+One step, then restart:
 
 ```bash
-rm .claude/settings.json
-unset ANTHROPIC_AUTH_TOKEN
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --uninstall
 ```
 
-Deleting the file is not enough. The key stays in the shell, and Claude Code keeps using it — now against `api.anthropic.com`, where it is not valid. What you see is an authentication failure that reads as a broken account:
+It removes both files and its own block from `.gitignore`, leaving anything else in there alone. `rm -rf .claude` does the same job if you have nothing else in that folder.
+
+**There is nothing to unset.** This used to be the step everyone missed: the key lived in the shell, survived the deletion of the config, and Claude Code kept sending it — to `api.anthropic.com`, where it is not valid. The result was an authentication failure that reads as a broken account:
 
 ```
 ⚠ another auth source is set and takes precedence over your claude.ai login
 ```
 
-Shell variables belong to the terminal, not the directory, so a leftover key also breaks unrelated projects opened from that same terminal. A fresh terminal works as well as `unset`. Then restart.
+That failure mode is gone, because the key goes away with the file. If you still see that message, something really is exporting `ANTHROPIC_AUTH_TOKEN` in your shell — an old `.zshrc` line, most likely.
 
 ## When everything claims the model is unavailable
 

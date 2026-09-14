@@ -39,7 +39,7 @@ Every tier points at a 0G model, so whichever one Claude Code reaches for, the r
 
 `glm-5.3` does not accept images. Pasting a screenshot into a session on the shipped config will fail — and `fallbackModel` will not rescue it, because that fallback fires on *overloaded or unavailable*, which an unsupported content type is not.
 
-On the direct path, the models that do accept images are `0gm-1.0-35b-a3b` (262144 context, TEE-attested) and the `claude-*` family (1M context, no TEE). For image **and video**, `qwen3.8-flash` handles both, but it speaks OpenAI only and therefore needs [the bridge](#openai-only-models-need-the-bridge).
+On the direct path, the models that do accept images are `0gm-1.0-35b-a3b` — which runs in an enclave — and the `claude-*` family, which does not (see [the TEE column](#what-the-tee-column-means)). For image **and video**, `qwen3.8-flash` handles both, but it speaks OpenAI only and therefore needs [the bridge](#openai-only-models-need-the-bridge).
 
 ### What the fallback does and does not cover
 
@@ -48,7 +48,7 @@ On the direct path, the models that do accept images are `0gm-1.0-35b-a3b` (2621
 Two limits worth knowing:
 
 - **It is not a capability net.** A request the primary model cannot serve — an image, say — is an error about the request, not about availability, so the chain does not advance.
-- **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is one global number, not per model.** It is set for `glm-5.3` (1048576), while the fallback accepts 262144. A session that has already grown past that will not be rescued either; the fallback helps early, not late.
+- **`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is one global number, not per model.** It is set for the shipped main model, while the fallback accepts a fraction of that. A session that has already grown past that will not be rescued either; the fallback helps early, not late.
 
 This is the project settings file, meant to be committed. If you also keep a personal `.claude/settings.local.json`, that one wins — Claude Code loads `local` after `project` — so a setting that seems not to apply is worth checking there first.
 
@@ -64,31 +64,56 @@ Edit `.claude/settings.json` and restart. Three fields move together:
 
 Leave `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `modelOverrides.claude-sonnet-5` alone. The second one is the permission gate: point it at a reasoning model and every Bash, git and network call starts timing out under auto mode.
 
-These models speak the Anthropic API and can be swapped in by editing alone. The router's lineup shifts — `glm-5.2` was on this list until it dropped Anthropic support, and `glm-5.3` was on the bridge list until it gained it — so [check it live](../README.md#live-model-list) before trusting the table:
+### Ask the router, don't trust a list
 
-| Model | Context | `CLAUDE_CODE_MAX_CONTEXT_TOKENS` |
-|---|---|---|
-| `glm-5.3` | 1048576 | `983616` (unchanged) |
-| `claude-fable-5` | 1000000 | `983616` |
-| `claude-opus-5` | 1000000 | `983616` |
-| `claude-opus-4-8` | 1000000 | `983616` |
-| `claude-sonnet-5` | 1000000 | `983616` |
-| `deepseek-v4-flash` | 1000000 | `983616` |
-| `deepseek-v4-pro` | 1000000 | `983616` |
-| `glm-5.3-flash` | 1000000 | `983616` |
-| `hy4-preview` | 1000000 | `983616` |
-| `0gm-1.0-35b-a3b` | 262144 | **`245760`** |
-| `glm-5` | 202752 | **`190080`** |
+There used to be a table here. It aged faster than anyone reading it would expect: eleven models
+became eighteen and then sixteen inside a single day, and three of the context lengths it quoted
+had already moved. A list of models in a file is a claim about a service that changes without
+telling you, so this asks the service instead:
 
-> The last two rows are the trap. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` ships as `983616`, which is far above what those models accept — leave it and the session fails on context length only once it grows long, by which point the model switch is the last thing you'd suspect. Lower it in the same edit.
+```bash
+curl -s https://router-api.0g.ai/v1/models | python3 -c "
+import json,sys
+rows=[m for m in json.load(sys.stdin)['data'] if 'anthropic' in (m.get('supported_formats') or [])]
+for m in sorted(rows, key=lambda x:-(x.get('context_length') or 0)):
+    c=m.get('context_length') or 0
+    v=m.get('verifiability') if m.get('tee_attested') else None
+    tee={'TeeML':'TEE, model in enclave','TeeTLS':'TEE, proxied upstream'}.get(v,'NO TEE')
+    print(f\"{m['id']:22} ctx={c:>8}  ceiling={c*15//16:>8}  {tee}\")"
+```
 
-Or run [`check-0g.sh`](../check-0g.sh) after any change — it reads the effective model, the gate and the ceiling, and says nothing when everything is fine:
+Anything it prints can be swapped in by editing alone. Anything it does not print speaks OpenAI
+only, and no amount of editing reaches it — it needs [the bridge](#openai-only-models-need-the-bridge).
+
+**Use the `ceiling` column.** It is the model's context length times 15/16, and it belongs in
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` in the same edit that changes the model. This is the part that
+gets left behind, and it fails in the least helpful way available: the config ships a ceiling
+suited to a large model, so moving to a smaller one breaks nothing until the session grows long —
+an error hours later, with the model switch the last thing you would suspect.
+
+Or run [`check-0g.sh`](../check-0g.sh) after any change — it reads the effective model, the gate
+and the ceiling, and says nothing when everything is fine:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh | sh
 ```
 
-Check the current list yourself with `curl -s https://router-api.0g.ai/v1/models`; anything whose `supported_formats` contains `anthropic` belongs in the table above. And whichever model you pick, don't append `[1m]` to its name — same failure as below.
+Whichever model you pick, don't append `[1m]` to its name — same failure as below.
+
+### What the TEE column means
+
+It has three values, and the first two are not the same thing:
+
+| Value | What runs where |
+|---|---|
+| `TEE, model in enclave` | The model itself runs inside the enclave and signs its responses. The strongest guarantee the router offers, and what `glm-5.3` — the model this config ships with — gives you. |
+| `TEE, proxied upstream` | A broker runs inside an enclave and relays to a centralised upstream provider. The link is attested; the model weights are not in the enclave. |
+| `NO TEE` | No attestation at all. These work fine and are reachable like any other — they simply carry none of the privacy guarantee you came here for. |
+
+The distinction is worth the paragraph because it is invisible at the point of use: every model
+on the list answers the same way, and nothing in a session tells you which tier you are on. The
+`claude-*` family is the whole of the third row — convenient, 1M context, and outside the
+guarantee.
 
 ## Don't pick a "(1M context)" entry
 

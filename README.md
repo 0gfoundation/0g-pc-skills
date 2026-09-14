@@ -6,13 +6,11 @@ The configs in [`configs/`](configs/) are ordinary files: readable, diffable, an
 
 ## Set up — Claude Code
 
-![Claude Code setup: export ANTHROPIC_AUTH_TOKEN in the terminal you will restart in, curl one settings.json into the project, pick a model, then verify with /status and any Bash call](Assets/0g-pc-claude-code-setup.png)
+Needs `claude` already installed (`claude --version`; otherwise `npm install -g @anthropic-ai/claude-code`) and a 0G key from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys.
 
 ### User workflow
 
 Two steps. The second one is where it goes wrong.
-
-Needs `claude` already installed (`claude --version`; otherwise `npm install -g @anthropic-ai/claude-code`) and a 0G key from [pc.0g.ai](https://pc.0g.ai) → Dashboard → API Keys.
 
 **① Key and config**, from inside the project you want on 0G. One line: `&&` runs it all in this shell, so the export stays put — which is where Claude Code will look for it.
 
@@ -45,8 +43,6 @@ Then run `/status`: the Base URL should read `https://router-api.0g.ai`. That is
 If you plan to edit the file, [what it contains](docs/claude-code.md#what-the-config-file-contains) is worth two minutes first.
 
 ## Set up — Codex
-
-![Codex setup: export ZG_API_KEY, pull three files, run the LiteLLM bridge in its own window, launch with --profile every time, then read the banner — model: glm-5.3 means you are on 0G, model: gpt-* means the request went to OpenAI](Assets/0g-pc-codex-setup.png)
 
 Codex cannot reach the 0G router directly — it speaks only the Responses API, which the router does not serve — so a local LiteLLM bridge translates. The bridge listens on `http://127.0.0.1:4000`, which is the address the profile points at; if that port is already taken, change it in both places.
 

@@ -21,6 +21,12 @@ GITIGNORE=".gitignore"
 MARK_HEAD="# >>> 0g-pc install >>>"
 MARK_FOOT="# <<< 0g-pc install <<<"
 
+# The three Claude Code skills, and where they go. ZG_SKILLS_DIR exists so the tests
+# can point this somewhere harmless; Claude Code itself reads ~/.claude/skills.
+SKILLS="setup switch-model uninstall"
+SKILLS_DIR="${ZG_SKILLS_DIR:-$HOME/.claude/skills}"
+RETIRED="0g-pc-model-config-claude"
+
 die() { printf '%s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 
@@ -32,6 +38,8 @@ Put Claude Code on 0G Private Computer.
   install.sh claude --key -                 read the key from the terminal instead,
                                             keeping it out of your shell history
   install.sh claude --uninstall             remove it again
+  install.sh skills                         install the three slash commands
+  install.sh skills --uninstall             remove them again
   install.sh --help
 
 Get a key at https://pc.0g.ai → Dashboard → API Keys.
@@ -41,6 +49,10 @@ Writes .claude/settings.json (no credentials, safe to commit) and
 A settings.json already in the project is kept as settings.json.0g-backup
 and put back by --uninstall. Your global ~/.claude/settings.json is never
 written.
+
+'skills' is the one subcommand that writes outside the project: it puts
+/0g-pc-setup, /0g-pc-switch-model and /0g-pc-uninstall in ~/.claude/skills,
+where Claude Code looks for them. It takes no key.
 EOF
 }
 
@@ -71,6 +83,7 @@ which client? Only 'claude' is supported today."; }
 
 case "$CLIENT" in
     claude) ;;
+    skills) ;;
     codex)  die "codex is not supported by this installer yet — it needs a long-running
 LiteLLM bridge, which one command cannot leave behind. See
 https://github.com/0gfoundation/0g-pc-skills#set-up--codex" ;;
@@ -80,6 +93,50 @@ esac
 
 have() { command -v "$1" >/dev/null 2>&1; }
 have python3 || die "python3 is required and was not found."
+
+# ------------------------------------------------------------------ skills
+
+if [ "$CLIENT" = skills ]; then
+    [ -z "$KEY" ] || die "skills takes no key — the slash commands never see one."
+
+    if [ "$MODE" = uninstall ]; then
+        gone=0
+        for s in $SKILLS; do
+            d="$SKILLS_DIR/0g-pc-$s"
+            if [ -d "$d" ]; then rm -rf "$d"; gone=$((gone + 1)); fi
+        done
+        [ "$gone" -gt 0 ] && note "removed $gone skill(s) from $SKILLS_DIR." \
+                          || note "nothing to remove — none of the three are installed."
+        exit 0
+    fi
+
+    mkdir -p "$SKILLS_DIR"
+    for s in $SKILLS; do
+        d="$SKILLS_DIR/0g-pc-$s"
+        mkdir -p "$d"
+        tmp="$(mktemp)"
+        curl -fsSL "$BASE_URL/skills/0g-pc-$s/SKILL.md" -o "$tmp" \
+            || { rm -f "$tmp"; die "could not fetch 0g-pc-$s from $BASE_URL — check your connection."; }
+        head -n 1 "$tmp" | grep -q '^---$' \
+            || { rm -f "$tmp"; die "what came back for 0g-pc-$s is not a skill file."; }
+        mv -f "$tmp" "$d/SKILL.md"
+    done
+    note "installed: /0g-pc-setup, /0g-pc-switch-model, /0g-pc-uninstall
+They register without a restart. Ask for one by name, or type / to see them."
+
+    # The skill these three replaced. Deleting someone's home directory is not this
+    # script's call, but leaving them unwarned is worse: it still wins requests from
+    # all three, and the setup it describes now ends at "Not logged in".
+    if [ -d "$SKILLS_DIR/$RETIRED" ]; then
+        note "
+$RETIRED is still installed and competes with all three.
+It also teaches a setup that no longer works. Remove it with:
+
+  rm -rf $SKILLS_DIR/$RETIRED"
+    fi
+    exit 0
+fi
+
 
 # ------------------------------------------------------------- .gitignore
 

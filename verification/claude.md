@@ -128,9 +128,7 @@ print('全局三键仍未变:', all(a.get(k)==b.get(k) for k in ['env','modelOve
 ## 6. 附加：Skill 走法（可选）
 
 ```bash
-for s in setup switch-model uninstall; do mkdir -p ~/.claude/skills/0g-pc-$s && curl -fsSL \
-  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-$s/SKILL.md \
-  -o ~/.claude/skills/0g-pc-$s/SKILL.md; done
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s skills
 
 # 旧 Skill 若在，必须先清掉：它与新三条抢同一批请求，且教的流程已作废
 rm -rf ~/.claude/skills/0g-pc-model-config-claude

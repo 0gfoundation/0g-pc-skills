@@ -3,9 +3,12 @@
 #
 #   sh tests/install.sh                 # key from ~/.0g-key
 #   ZG_TEST_KEY=sk-… sh tests/install.sh
+#   sh tests/install.sh skills          # only the cases that need no key
 #
 # Each install spends about 14 tokens validating the key against the router.
 set -u
+
+ONLY="${1:-all}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INSTALL="$REPO/install.sh"
@@ -13,7 +16,10 @@ export ZG_BASE_URL="file://$REPO"
 
 KEY="${ZG_TEST_KEY:-}"
 [ -n "$KEY" ] || [ ! -f "$HOME/.0g-key" ] || KEY="$(cat "$HOME/.0g-key")"
-[ -n "$KEY" ] || { echo "no key: set ZG_TEST_KEY or write ~/.0g-key" >&2; exit 2; }
+[ "$ONLY" = skills ] || [ -n "$KEY" ] || {
+    echo "no key: set ZG_TEST_KEY or write ~/.0g-key" >&2
+    echo "(the skills subcommand needs none: sh tests/install.sh skills)" >&2
+    exit 2; }
 FAKE="sk-fake-key-that-the-router-will-reject"
 
 # stat is spelled differently on BSD and GNU; tests should run on both.
@@ -35,6 +41,55 @@ GLOBAL_BEFORE="$( [ -f "$GLOBAL" ] && shasum "$GLOBAL" | cut -d" " -f1 || echo a
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 fresh() { rm -rf "$WORK/p"; mkdir -p "$WORK/p"; cd "$WORK/p"; git init -q .; }
+
+# ----------------------------------------------------------------------- #85
+# No key, no router: the skills subcommand touches neither. Kept first so that
+# `sh tests/install.sh skills` can stop before anything that needs one.
+echo "#85 — skills 子命令"
+SKD="$WORK/skills"
+rm -rf "$SKD"
+
+ZG_SKILLS_DIR="$SKD" sh "$INSTALL" skills >/dev/null 2>&1; want "安装退出 0" pass $?
+n=0
+for k in setup switch-model uninstall; do
+    diff -q "$SKD/0g-pc-$k/SKILL.md" "$REPO/skills/0g-pc-$k/SKILL.md" >/dev/null 2>&1 \
+        && n=$((n + 1))
+done
+[ "$n" = 3 ] && ok "三个 SKILL.md 与仓库逐字节一致" || no "三个 SKILL.md 与仓库逐字节一致" "一致 $n/3"
+
+before="$(find "$SKD" -name SKILL.md -exec shasum {} \; | shasum)"
+ZG_SKILLS_DIR="$SKD" sh "$INSTALL" skills >/dev/null 2>&1; want "二次安装退出 0" pass $?
+[ "$before" = "$(find "$SKD" -name SKILL.md -exec shasum {} \; | shasum)" ] \
+    && ok "幂等：文件逐字节不变" || no "幂等：文件逐字节不变"
+
+# 旧 Skill 归用户处置：脚本必须提醒，但不得代为删除
+mkdir -p "$SKD/0g-pc-model-config-claude"
+printf 'old\n' > "$SKD/0g-pc-model-config-claude/SKILL.md"
+out="$(ZG_SKILLS_DIR="$SKD" sh "$INSTALL" skills 2>&1)"
+printf '%s' "$out" | grep -q 'still installed' \
+    && ok "旧 Skill 在场时给出提醒" || no "旧 Skill 在场时给出提醒"
+[ -f "$SKD/0g-pc-model-config-claude/SKILL.md" ] \
+    && ok "但不代替用户删除" || no "但不代替用户删除"
+
+ZG_SKILLS_DIR="$SKD" sh "$INSTALL" skills --uninstall >/dev/null 2>&1; want "卸载退出 0" pass $?
+left=0
+for k in setup switch-model uninstall; do [ -e "$SKD/0g-pc-$k" ] && left=$((left + 1)); done
+[ "$left" = 0 ] && ok "三个目录已移除" || no "三个目录已移除" "剩 $left"
+[ -e "$SKD/0g-pc-model-config-claude" ] \
+    && ok "只移除自己装的，旧 Skill 留在原处" || no "只移除自己装的，旧 Skill 留在原处"
+
+ZG_SKILLS_DIR="$SKD" sh "$INSTALL" skills --key sk-anything >/dev/null 2>&1
+want "skills 带 key 被拒" fail $?
+sh "$INSTALL" --help 2>/dev/null | grep -q 'install.sh skills' \
+    && ok "--help 列出 skills" || no "--help 列出 skills"
+sh "$INSTALL" claude skills >/dev/null 2>&1; want "两个 client 被拒" fail $?
+
+if [ "$ONLY" = skills ]; then
+    echo
+    echo "通过 ${pass}，失败 ${fail}（仅 skills 段）"
+    [ "$fail" -eq 0 ]
+    exit $?
+fi
 
 # ------------------------------------------------------------------------ J
 echo "J — 参数处理"

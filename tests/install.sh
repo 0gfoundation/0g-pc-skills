@@ -279,6 +279,32 @@ sh "$INSTALL" claude --key "$KEY" >/dev/null 2>&1
 sh "$INSTALL" claude --uninstall >/dev/null 2>&1
 [ ! -e .claude ] && ok ".claude 目录已消失" || no ".claude 目录已消失" "$(ls -a .claude 2>/dev/null | tr '\n' ' ')"
 
+# ----------------------------------------------------------------------- #99
+echo "#99 — 装完 config 后指向三个 slash command"
+fresh
+SKD99="$WORK/skills99"; rm -rf "$SKD99"; mkdir -p "$SKD99"
+out="$(ZG_SKILLS_DIR="$SKD99" sh "$INSTALL" claude --key "$KEY" 2>&1)"
+printf '%s' "$out" | grep -q 'bash -s skills' \
+    && ok "一个都没装时给出安装命令" || no "一个都没装时给出安装命令"
+printf '%s' "$out" | grep -q '/0g-pc-switch-model' \
+    && ok "点名三个命令" || no "点名三个命令"
+
+mkdir -p "$SKD99/0g-pc-setup" "$SKD99/0g-pc-switch-model" "$SKD99/0g-pc-uninstall"
+out="$(ZG_SKILLS_DIR="$SKD99" sh "$INSTALL" claude --key "$KEY" 2>&1)"
+printf '%s' "$out" | grep -q 'bash -s skills' \
+    && no "三个都在时不再提" || ok "三个都在时不再提"
+
+rm -rf "$SKD99/0g-pc-uninstall"
+out="$(ZG_SKILLS_DIR="$SKD99" sh "$INSTALL" claude --key "$KEY" 2>&1)"
+printf '%s' "$out" | grep -q 'bash -s skills' \
+    && ok "缺一个仍然提" || no "缺一个仍然提"
+
+# 提示属于成功路径。key 被拒时用户要处理的是 key，不是再装三个命令。
+fresh
+out="$(ZG_SKILLS_DIR="$WORK/skills99-none" sh "$INSTALL" claude --key "$FAKE" 2>&1)"
+printf '%s' "$out" | grep -q 'bash -s skills' \
+    && no "失败路径不提" || ok "失败路径不提"
+
 echo "#81 — 全局配置全程未被触碰"
 GLOBAL_AFTER="$( [ -f "$GLOBAL" ] && shasum "$GLOBAL" | cut -d' ' -f1 || echo absent )"
 [ "$GLOBAL_BEFORE" = "$GLOBAL_AFTER" ] \

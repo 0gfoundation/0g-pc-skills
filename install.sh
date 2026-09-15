@@ -383,9 +383,30 @@ if curl -fsSL "$BASE_URL/check-0g.sh" -o "$tmp_chk" 2>/dev/null; then
 above found a problem. Fix it and run this again."
 fi
 
+# The three slash commands are a separate install, because they go in a separate place:
+# ~/.claude/skills, not this project. Someone who ran only the command above has the
+# config and none of them, and the terminal is where they are looking — not the README.
+# Nothing to say to someone who already has all three.
+missing=0
+for s in $SKILLS; do
+    [ -d "$SKILLS_DIR/0g-pc-$s" ] || missing=$((missing + 1))
+done
+
+if [ "$missing" -gt 0 ]; then
+    SKILLS_NOTE="
+Three slash commands are not part of this — /0g-pc-setup, /0g-pc-switch-model and
+/0g-pc-uninstall. They go in $SKILLS_DIR rather than in the project, so they are a
+second command, and it takes no key:
+
+  curl -fsSL $BASE_URL/install.sh | bash -s skills
+"
+else
+    SKILLS_NOTE=""
+fi
+
 note "done. Claude Code is on 0G in this project.
 Start it in any terminal — no export needed:
 
   claude
-
+$SKILLS_NOTE
 Undo with: install.sh claude --uninstall"

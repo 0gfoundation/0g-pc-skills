@@ -1,6 +1,6 @@
 # Claude Code on 0G — reference
 
-Everything worth knowing once the setup works. Setting it up in the first place is [three steps in the README](../README.md#set-up--claude-code).
+Everything worth knowing once the setup works. Setting it up in the first place is [four steps in the README](../README.md#set-up--claude-code).
 
 Config is read at launch, so nothing changes in a session that was already open. Close it, open a new terminal in the same project, run `claude`, and check `/status` — the Base URL should read `https://router-api.0g.ai`.
 

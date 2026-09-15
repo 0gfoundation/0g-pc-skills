@@ -33,21 +33,53 @@ def load(p):
         return {}
 
 cfg = load(".claude/settings.json")
-if not cfg:
-    sys.exit("no .claude/settings.json here — run this from the project you configured")
-env = cfg.get("env", {})
-
-# .claude/settings.local.json is where the key lives, so credentials there are expected and
-# not reported. Anything else in it shadows the project settings checked below — local is
-# loaded after project and wins — and a config that "does not apply" is usually this.
 local_path = pathlib.Path(LOCAL)
 shadow = load(LOCAL)
-shadowing = [k for k in ("modelOverrides", "permissions") if k in shadow]
-shadowing += [f"env.{k}" for k in sorted(set(shadow.get("env", {})) - CREDENTIALS)]
-if shadowing:
-    problems.append(f'{LOCAL} also sets {", ".join(shadowing)} and takes precedence over the\n'
-                    '  project settings checked here — Claude Code loads local after project.\n'
-                    '  Credentials belong there; configuration does not.')
+
+if not cfg:
+    # Everything in settings.local.json is how this was set up before the installer existed.
+    # It still works, but it cannot be committed or shared, and nothing here can check it
+    # against a project baseline — so say what to do rather than just refusing to run.
+    if (shadow.get("env") or {}).get("ANTHROPIC_BASE_URL"):
+        sys.exit(f'this project keeps its whole 0G config in {LOCAL}, with no\n'
+                 '  .claude/settings.json beside it — the layout from before the installer.\n'
+                 '  It works, but the config cannot be committed and nothing checks it.\n'
+                 '  Fix: re-run the installer here. It writes the config to settings.json and\n'
+                 f'  leaves only the key in {LOCAL}:\n'
+                 '    curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --key sk-…')
+    sys.exit("no .claude/settings.json here — run this from the project you configured")
+
+# Claude Code loads local after project, so local wins. Every check below asks the merged
+# result rather than the project file: a setting that is overridden is not the setting in force,
+# and checking the one that is not in force is how a broken gate passes.
+def effective(key):
+    p_, l_ = cfg.get(key), shadow.get(key)
+    if isinstance(p_, dict) and isinstance(l_, dict):
+        return {**p_, **l_}
+    return l_ if l_ is not None else p_
+
+env = {**cfg.get("env", {}), **shadow.get("env", {})}
+
+# Report a key in local only when it actually overrides one the project sets. Claude Code writes
+# its own permissions.allow entries into this file every time a tool is approved, and flagging
+# those means flagging almost every project anyone has worked in — for a note that overrides
+# nothing. The advice would also be impossible to follow: removing the entry only makes Claude
+# Code write it again. Collisions are the thing worth reporting, so report only those.
+collisions = []
+for key in ("modelOverrides", "permissions"):
+    p_, l_ = cfg.get(key), shadow.get(key)
+    if isinstance(p_, dict) and isinstance(l_, dict):
+        for sub in sorted(set(p_) & set(l_)):
+            if p_[sub] != l_[sub]:
+                collisions.append(f'{key}.{sub}: project has {p_[sub]!r}, {LOCAL} has {l_[sub]!r} — local wins')
+for sub in sorted((set(cfg.get("env", {})) & set(shadow.get("env", {}))) - CREDENTIALS):
+    if cfg["env"][sub] != shadow["env"][sub]:
+        collisions.append(f'env.{sub}: project has {cfg["env"][sub]!r}, {LOCAL} has '
+                          f'{shadow["env"][sub]!r} — local wins')
+if collisions:
+    problems.append(f'{LOCAL} overrides settings the project config also sets. Claude Code loads\n'
+                    '  local after project, so these values win and edits to settings.json will look\n'
+                    '  ignored:\n    ' + '\n    '.join(collisions))
 
 # 0 — the key: present, private, and out of reach of git
 key_in_file = any(shadow.get("env", {}).get(k) for k in CREDENTIALS)
@@ -94,7 +126,7 @@ for label, path in (("project local", ".claude/settings.local.json"),
         break
 
 # 2 — the permission gate
-gate = (cfg.get("modelOverrides") or {}).get("claude-sonnet-5")
+gate = (effective("modelOverrides") or {}).get("claude-sonnet-5")
 if not gate:
     problems.append('modelOverrides["claude-sonnet-5"] is unset — the auto-mode gate resolves through the\n'
                     '  Sonnet tier, so leaving it out sends the safety call to whatever Claude Code picks.')

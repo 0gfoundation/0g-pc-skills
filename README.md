@@ -26,7 +26,17 @@ Then start Claude Code — **any terminal, no export**:
 claude
 ```
 
-Run `/status` if you want to see it: the Base URL should read `https://router-api.0g.ai`. That is the whole setup. It arrives working, on `glm-5.3`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
+Run `/status` if you want to see it: the Base URL should read `https://router-api.0g.ai`. That is the config done. It arrives working, on `glm-5.3`, and the startup line `[claude-code:unrecognized_model]` is expected — Claude Code simply doesn't know 0G's model names.
+
+Out again is the same script, and it is the other half of this one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s claude --uninstall
+```
+
+It restores whatever `.claude/settings.json` was there before, and takes your key back out of
+`settings.local.json` — so there is nothing to unset [and nothing to tidy up by
+hand](docs/claude-code.md#going-back-to-anthropic). Restart after it.
 
 The installer checks your key against the router before claiming success, so a rejected key says so straight away instead of surfacing later as a failure to start. An empty balance is reported as its own case: the key is fine, and nothing about the config needs changing.
 
@@ -39,12 +49,46 @@ Another project? Run it there too. macOS and Linux; on Windows use WSL or Git Ba
 | You want | Do this |
 |---|---|
 | a different tier, without restarting | `/model` — Opus and Fable are `glm-5.3`, Sonnet and Haiku `0gm-1.0-35b-a3b`. **Never pick a "(1M context)" entry:** [it breaks every Bash, git and network call](docs/claude-code.md#dont-pick-a-1m-context-entry). |
-| a different main model | Edit four fields and restart — [ask the router which ones qualify, and take the ceiling it gives you](docs/claude-code.md#ask-the-router-dont-trust-a-list). |
+| a different main model | Edit four fields and restart — [ask the router which ones qualify, and take the ceiling it gives you](docs/claude-code.md#ask-the-router-dont-trust-a-list). Or let [`/0g-pc-switch-model`](#the-skills) do it. |
 | a model the router only serves in OpenAI format | It cannot reach Claude Code directly — [it needs the LiteLLM bridge](docs/claude-code.md#openai-only-models-need-the-bridge). Which models those are changes; ask the router rather than a list. |
 | to confirm you are really on 0G | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/check-0g.sh \| sh` — it reads the effective model, the permission gate and the context ceiling, and says nothing when all three are right. |
-| out | `curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh \| bash -s claude --uninstall`, then restart. It restores whatever `.claude/settings.json` was there before, and takes your key back out of `settings.local.json` — so there is nothing to unset [and nothing to tidy up by hand](docs/claude-code.md#going-back-to-anthropic). |
 
 If you plan to edit the file, [what it contains](docs/claude-code.md#what-the-config-file-contains) is worth two minutes first.
+
+### The skills
+
+The config above is the whole of 0G in this project. These are three slash commands on top of it,
+one job each — install all three from anywhere, they are not per-project:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s skills
+```
+
+Same script as the setup command, and the only subcommand that writes outside a project — the
+skills go in `~/.claude/skills`, where Claude Code looks for them. It takes no key, and they
+register without a restart. `bash -s skills --uninstall` removes them again.
+
+| Command | What it does |
+|---|---|
+| `/0g-pc-setup` | First-time setup: shows what the router actually serves, with the TEE tier and whether the model takes images, then hands you the install command to run yourself |
+| `/0g-pc-switch-model` | Changes the model, moving the context ceiling with it and leaving the permission gate alone |
+| `/0g-pc-uninstall` | Puts the project back, telling you first what it will restore and what it will remove |
+
+They are not a gentler way to run the curl above — `/0g-pc-switch-model` and `/0g-pc-uninstall`
+do things no curl in this README does.
+
+**They need a Claude Code that already starts.** A skill runs inside a session, so it cannot
+rescue one that will not open — if you land on `Not logged in`, re-run the installer from [the
+workflow above](#user-workflow) instead. (`/login` does not fix that one: it authenticates
+against Anthropic, and that token is no use once the base URL points at 0G.)
+
+**If you installed the old `0g-pc-model-config-claude`, remove it.** Deleting it here does not
+delete it from your machine, and the copy you have competes with these three for the same
+requests — while still teaching a setup that no longer works, one that ends at `Not logged in`.
+
+```bash
+rm -rf ~/.claude/skills/0g-pc-model-config-claude
+```
 
 ## Set up — Codex
 
@@ -84,6 +128,19 @@ codex --profile zg-glm53
 
 Then, every launch, read the `model:` line in the startup banner: your configured model means the profile loaded, `gpt-*` means it was not found and the request went to `api.openai.com` instead ([why that is silent](docs/codex.md#reading-the-model-line)).
 
+### The skill
+
+Codex has one skill, and it is a separate path from the three above — install it, then say
+**"set up 0G PC in Codex"**.
+
+```bash
+mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \
+  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-codex/SKILL.md \
+  -o ~/.codex/skills/0g-pc-model-config-codex/SKILL.md
+```
+
+**Update:** re-run the curl. **Uninstall:** `rm -rf` the skill directory.
+
 ### Then what
 
 | You want | Do this |
@@ -94,50 +151,6 @@ Then, every launch, read the `model:` line in the startup banner: your configure
 | out | `rm "${CODEX_HOME:-$HOME/.codex}"/zg-glm53.config.toml && rm -rf ~/.0g-litellm`, and Ctrl-C the bridge. |
 
 `codex exec` takes the flag too, and the banner has one more failure mode worth knowing — both in the [Codex reference](docs/codex.md).
-
-## The skills
-
-Three slash commands for Claude Code, one job each. They are not a gentler way to run the command
-above — `/0g-pc-switch-model` and `/0g-pc-uninstall` do things no curl in this README does.
-
-| Command | What it does |
-|---|---|
-| `/0g-pc-setup` | First-time setup: shows what the router actually serves, with the TEE tier and whether the model takes images, then hands you the install command to run yourself |
-| `/0g-pc-switch-model` | Changes the model, moving the context ceiling with it and leaving the permission gate alone |
-| `/0g-pc-uninstall` | Puts the project back, telling you first what it will restore and what it will remove |
-
-**They need a Claude Code that already starts.** A skill runs inside a session, so it cannot
-rescue one that will not open — if you land on `Not logged in`, re-run the installer from the
-[setup section](#set-up--claude-code) instead. (`/login` does not fix that one: it authenticates
-against Anthropic, and that token is no use once the base URL points at 0G.)
-
-Install all three:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/install.sh | bash -s skills
-```
-
-Same script as the setup command, and the only subcommand that writes outside a project — the
-skills go in `~/.claude/skills`, where Claude Code looks for them. It takes no key, and they
-register without a restart. `bash -s skills --uninstall` removes them again.
-
-**If you installed the old `0g-pc-model-config-claude`, remove it.** Deleting it here does not
-delete it from your machine, and the copy you have competes with these three for the same
-requests — while still teaching a setup that no longer works, one that ends at `Not logged in`.
-
-```bash
-rm -rf ~/.claude/skills/0g-pc-model-config-claude
-```
-
-**Codex** is a separate skill and a separate path — install it, then say **"set up 0G PC in Codex"**.
-
-```bash
-mkdir -p ~/.codex/skills/0g-pc-model-config-codex && curl -fsSL \
-  https://raw.githubusercontent.com/0gfoundation/0g-pc-skills/main/skills/0g-pc-model-config-codex/SKILL.md \
-  -o ~/.codex/skills/0g-pc-model-config-codex/SKILL.md
-```
-
-**Update:** re-run the curl. **Uninstall:** `rm -rf` the skill directory.
 
 ## Verifying a change
 
